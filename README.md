@@ -1,6 +1,6 @@
 # Constellations
 
-A calm, satisfying memory game set in the night sky. Watch the stars light up, then trace them in the same order. Every constellation you finish uncovers one word of a hidden message.
+A calm, satisfying memory game set in the night sky. Watch the stars light up, then trace them in the same order. Each constellation is longer and faster than the last.
 
 **Play:** open `index.html` in any browser (desktop or phone). No build step and no dependencies.
 
