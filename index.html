@@ -141,6 +141,18 @@
   .btn-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
   .btn.ghost { background: transparent; border-color: rgba(143,155,199,.45); color: var(--mist); }
 
+  .devbox { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 14px; border-top: 1px dashed rgba(143,155,199,.35); width: 100%; }
+  .dev-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+  .dev-row select {
+    font: 400 14px var(--body); color: var(--starlight); background: var(--ink); border: 1px solid rgba(143,155,199,.5);
+    border-radius: 2px; padding: 10px 12px; max-width: 100%;
+  }
+  .dev-row select:focus-visible { outline: 2px solid var(--aurora); outline-offset: 2px; }
+  .dev-row .btn { margin-top: 0; padding: 11px 22px; }
+  @media (max-width: 440px) {
+    .badges { gap: 5px; }
+    .badges .medal { width: 32px; height: 32px; }
+  }
   @media (max-height: 520px) {
     .panel { gap: 10px; }
     .lede { font-size: 14px; line-height: 1.45; }
@@ -181,6 +193,14 @@
     <p class="fine">Shields forgive a wrong star. Perfect rounds raise your multiplier. Golden stars are worth more.<br>Best with sound on.</p>
     <button class="btn" id="startBtn">Begin</button>
     <p class="fine" id="bestLine"></p>
+    <div class="devbox" id="devBox" hidden>
+      <label class="eyebrow" for="levelPick">Test mode · start at level</label>
+      <div class="dev-row">
+        <select id="levelPick"></select>
+        <button class="btn ghost" id="testBtn">Start test</button>
+      </div>
+      <p class="fine">Test runs don't save your best score, badges or progress.</p>
+    </div>
     <div class="badges" id="startBadges"></div>
     <p class="fine" id="startNext"></p>
   </div>
@@ -446,7 +466,7 @@
   let total = store.get('const.total', 0), earnedThisGame = [];
   let navEarned = store.get('const.navigator', 0), chart = null, chartedThisGame = false;
   let best = store.get('const.best', 0), bestLevel = store.get('const.bestLevel', 0);
-  let paidUpTo = 0;
+  let paidUpTo = 0, testRun = false, testStart = 1;
   let seq = [], decoys = [], lines = [], inputIdx = 0, perfect = true, spacing = 80, playArea = { x: 0, y: 0, w: 1, h: 1 };
   let particles = [], rings = [], popups = [], past = [], meteors = [], nextMeteor = 4;
   let cam = { z: 1, v: 0, shake: 0 }, lineFlash = 0, pointer = { x: 0, y: 0 }, pastGlow = 0;
@@ -524,7 +544,7 @@
   }
   function buildLevel() {
     current = levelInfo(level);
-    el.constNum.textContent = roman(level) + ' · ' + current.latin;
+    el.constNum.textContent = (testRun ? 'Test · ' : '') + roman(level) + ' · ' + current.latin;
     el.constName.textContent = current.name;
     computeArea();
     let order, rest, names = null;
@@ -565,7 +585,7 @@
     seq = order.map((p, i) => ({ ...norm(p), idx: i, name: names ? names[i] : '', label: 0, golden: i === goldenIdx, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
     decoys = rest.map(p => ({ ...norm(p), idx: -1, name: '', label: 0, golden: false, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
     lines = []; inputIdx = 0; perfect = true; paidUpTo = 0;
-    el.constNum.textContent = roman(level) + ' · ' + current.latin;
+    el.constNum.textContent = (testRun ? 'Test · ' : '') + roman(level) + ' · ' + current.latin;
     el.constName.textContent = current.name;
   }
   const allStars = () => seq.concat(decoys);
@@ -653,7 +673,7 @@
       }
     });
     pastGlow = 0.5;
-    total++; store.set('const.total', total);
+    total++; if (!testRun) store.set('const.total', total);
     const badge = BADGES.find(b => b[0] === total);
     let wait = 2000;
     if (badge) { earnedThisGame.push(badge[0]); after(1100, () => showBadge(badge)); wait = 4200; }
@@ -668,7 +688,7 @@
     seq = []; decoys = []; lines = []; past = [];
     chartedThisGame = true;
     const firstTime = !navEarned;
-    navEarned = (navEarned || 0) + 1; store.set('const.navigator', navEarned);
+    navEarned = (navEarned || 0) + 1; if (!testRun) store.set('const.navigator', navEarned);
     // Each constellation sits at its real place on the sky; Orion's Belt is drawn as part of Orion.
     chart = { alpha: 1, labels: 1, bottom: chartTargetBottom(), ext: 0, items: REAL.slice(1).map(c => {
       const v = c.stars.map(([ra, dec]) => { const a = ra * Math.PI / 12, d = dec * Math.PI / 180; return [Math.cos(d) * Math.cos(a), Math.cos(d) * Math.sin(a), Math.sin(d)]; });
@@ -782,10 +802,10 @@
   function gameOver() {
     phase = 'over'; setBanner('');
     Sound.setLayers(1);
-    const newBest = score > best;
+    const newBest = !testRun && score > best;
     const prevBest = best;
     if (newBest) { best = score; store.set('const.best', best); }
-    if (level > bestLevel) { bestLevel = level; store.set('const.bestLevel', bestLevel); }
+    if (!testRun && level > bestLevel) { bestLevel = level; store.set('const.bestLevel', bestLevel); }
     $('endEyebrow').textContent = chartedThisGame ? (newBest ? 'Night sky charted · New best!' : 'Night sky charted') : newBest ? 'New best!' : 'The sky goes quiet';
     $('endEyebrow').className = 'eyebrow' + (newBest || chartedThisGame ? ' gold' : '');
     $('endSummary').textContent = chartedThisGame && level === REAL.length
@@ -798,6 +818,7 @@
       : gap === 0 ? 'You tied your best. One more to beat it?'
       : gap <= Math.max(100, prevBest * 0.2) ? `Only ${gap.toLocaleString()} points from your best. One more?` : `Your best is ${best.toLocaleString()}.`;
     renderBadges('endBadges', 'endNext');
+    if (testRun) { $('endEyebrow').textContent = 'Test run · ' + $('endEyebrow').textContent; $('endNear').textContent = `Test run from constellation ${roman(testStart)}. Nothing was saved. Play again restarts the test.`; }
     const newNames = (chartedThisGame ? ['Celestial Navigator'] : []).concat(earnedThisGame.map(t => BADGES.find(b => b[0] === t)[1]));
     if (newNames.length) $('endNext').textContent = 'New this game: ' + newNames.join(', ') + '. ' + $('endNext').textContent;
     el.end.hidden = false;
@@ -816,10 +837,12 @@
     requestAnimationFrame(step);
   }
 
-  function startGame() {
+  function startGame(fromLevel) {
+    testRun = typeof fromLevel === 'number';
+    if (testRun) testStart = fromLevel;
     Sound.init();
     timers = []; particles = []; rings = []; popups = []; past = []; lines = [];
-    level = 1; score = 0; shownScore = 0; streak = 0; mult = 1; shields = 2; earnedThisGame = []; chart = null; chartedThisGame = false;
+    level = testRun ? testStart : 1; score = 0; shownScore = 0; streak = 0; mult = 1; shields = 2; earnedThisGame = []; chart = null; chartedThisGame = false;
     el.start.hidden = true; el.end.hidden = true; $('chartedScreen').hidden = true;
     renderShields(); renderMult(); Sound.setLayers(2);
     buildLevel();
@@ -1019,8 +1042,20 @@
     tap(x, y);
   });
   window.addEventListener('pointermove', e => { pointer.x = e.clientX; pointer.y = e.clientY; }, { passive: true });
-  $('startBtn').addEventListener('click', startGame);
-  $('againBtn').addEventListener('click', startGame);
+  $('startBtn').addEventListener('click', () => startGame());
+  $('againBtn').addEventListener('click', () => (testRun ? startGame(testStart) : startGame()));
+  $('testBtn').addEventListener('click', () => startGame(+$('levelPick').value));
+  // Test mode: open the page with #dev, or tap the title five times
+  $('levelPick').innerHTML = REAL.map((c, i) => `<option value="${i + 1}">${roman(i + 1)} · ${c.name} (${c.stars.length} stars)</option>`).join('')
+    + [15, 20, 30].map(n => `<option value="${n}">${roman(n)} · Uncharted (10 stars)</option>`).join('');
+  const showDev = () => { $('devBox').hidden = false; };
+  if (location.hash === '#dev') showDev();
+  window.addEventListener('hashchange', () => { if (location.hash === '#dev') showDev(); });
+  let titleTaps = 0, titleTimer = 0;
+  document.querySelector('.title').addEventListener('click', () => {
+    clearTimeout(titleTimer); titleTimer = setTimeout(() => (titleTaps = 0), 2500);
+    if (++titleTaps >= 5) { titleTaps = 0; $('devBox').hidden = !$('devBox').hidden; }
+  });
   $('continueBtn').addEventListener('click', continueUncharted);
   $('finishBtn').addEventListener('click', finishCharted);
   el.mute.addEventListener('click', () => { Sound.init(); Sound.toggle(); renderMute(); });
@@ -1028,7 +1063,7 @@
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'm' || e.key === 'M') { Sound.init(); Sound.toggle(); renderMute(); }
     if ((e.key === 'Enter' || e.key === ' ') && document.activeElement === document.body) {
-      if (phase === 'menu' || phase === 'over') { e.preventDefault(); startGame(); }
+      if (phase === 'menu' || phase === 'over') { e.preventDefault(); phase === 'over' && testRun ? startGame(testStart) : startGame(); }
     }
   });
   let rt = 0;
