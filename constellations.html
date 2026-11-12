@@ -88,14 +88,6 @@
   @keyframes fadein { from { opacity: 0; } }
   .overlay > .panel { margin: auto; }
   .overlay.charted > .panel { margin: auto auto 0; }
-  @media (max-height: 520px) {
-    .panel { gap: 10px; }
-    .lede { font-size: 14px; line-height: 1.45; }
-    .big-score { font-size: clamp(40px, 14vh, 80px); }
-    .btn { padding: 11px 28px; }
-    .medal.large { width: 52px; height: 52px; }
-    .overlay.charted { background: rgba(6,10,28,.88); }
-  }
   .panel { max-width: 34rem; width: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 18px; }
   .title { font-family: var(--display); font-weight: 400; font-size: clamp(24px, min(8.4vw, 11vh), 84px); letter-spacing: .05em; line-height: 1; margin: 0; text-transform: uppercase; white-space: nowrap; text-shadow: 0 0 40px rgba(127,231,216,.25); }
   .lede { font-size: 16px; line-height: 1.6; color: var(--starlight); opacity: .86; margin: 0; max-width: 30rem; }
@@ -144,6 +136,14 @@
   .btn-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
   .btn.ghost { background: transparent; border-color: rgba(143,155,199,.45); color: var(--mist); }
 
+  @media (max-height: 520px) {
+    .panel { gap: 10px; }
+    .lede { font-size: 14px; line-height: 1.45; }
+    .big-score { font-size: clamp(40px, 14vh, 80px); }
+    .btn { padding: 11px 22px; letter-spacing: .18em; margin-top: 0; }
+    .medal.large { width: 52px; height: 52px; }
+    .overlay.charted { background: rgba(6,10,28,.88); }
+  }
   @media (prefers-reduced-motion: reduce) {
     .overlay, .badge-toast, .medal.fresh { animation: none; }
   }
@@ -695,7 +695,7 @@
     const lab = h > 200 ? 18 : 0;
     const k = Math.min(Math.min(w / (2 * Math.PI), h / 2.7) * 1.7, (h - lab - 16) / (2 * chart.ext));
     const pad = chart.ext * k;
-    return { x: x0, y: top + pad, w, h: Math.max(1, h - 2 * pad - lab), k, labels: lab > 0 };
+    return { x: x0, y: top + pad, w, h: Math.max(1, h - 2 * pad - lab), k, labels: lab > 0, tiny: h < 100 };
   }
   function chartTargetBottom() {
     const panel = $('chartedScreen').hidden ? null : $('chartedScreen').querySelector('.panel');
@@ -903,6 +903,7 @@
     // The whole charted sky, each constellation at its real position
     if (chart) {
       const L = chartLayout(), k = L.k;
+      if (L.tiny) chart.items.forEach(it => (it.p = 0)); // no room above the panel on very short screens
       ctx.font = '400 11px Jost, system-ui, sans-serif'; ctx.textAlign = 'center';
       for (const it of chart.items) {
         if (it.p <= 0) continue;
