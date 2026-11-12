@@ -32,13 +32,15 @@
   #sky { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
 
   .hud {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 2;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 6;
     display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
     padding-top: calc(env(safe-area-inset-top, 0px) + 14px);
     padding-left: max(16px, env(safe-area-inset-left, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
     pointer-events: none;
   }
+  /* While a menu is open the HUD sits above it (so sound stays reachable) but recedes */
+  body.menu-open .hud-left, body.menu-open .score, body.menu-open .mult, body.menu-open .shields { opacity: .12; transition: opacity .4s; }
   .hud-left, .hud-right { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .hud-right { align-items: flex-end; }
   .eyebrow { font-size: 11px; letter-spacing: .22em; text-transform: uppercase; color: var(--mist); font-weight: 400; }
@@ -58,7 +60,7 @@
   .shield.on { background: var(--aurora); box-shadow: 0 0 8px var(--aurora); }
   .shield.off { opacity: .35; border-color: var(--mist); }
   .mute {
-    pointer-events: auto; background: none; border: 0; color: var(--mist); padding: 4px; margin: -4px; cursor: pointer;
+    position: relative; z-index: 6; pointer-events: auto; background: none; border: 0; color: var(--mist); padding: 4px; margin: -4px; cursor: pointer;
     display: grid; place-items: center; border-radius: 6px;
   }
   .mute:focus-visible { outline: 2px solid var(--aurora); outline-offset: 2px; }
@@ -76,7 +78,7 @@
 
 
   .overlay {
-    position: fixed; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
+    position: fixed; inset: 0; z-index: 5; display: flex; overflow-y: auto; overscroll-behavior: contain;
     padding-left: max(16px, env(safe-area-inset-left, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
     padding-block: calc(env(safe-area-inset-top, 0px) + 24px) calc(env(safe-area-inset-bottom, 0px) + 24px);
@@ -84,8 +86,18 @@
     animation: fadein .6s ease both;
   }
   @keyframes fadein { from { opacity: 0; } }
+  .overlay > .panel { margin: auto; }
+  .overlay.charted > .panel { margin: auto auto 0; }
+  @media (max-height: 520px) {
+    .panel { gap: 10px; }
+    .lede { font-size: 14px; line-height: 1.45; }
+    .big-score { font-size: clamp(40px, 14vh, 80px); }
+    .btn { padding: 11px 28px; }
+    .medal.large { width: 52px; height: 52px; }
+    .overlay.charted { background: rgba(6,10,28,.88); }
+  }
   .panel { max-width: 34rem; width: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 18px; }
-  .title { font-family: var(--display); font-weight: 400; font-size: clamp(34px, 9vw, 84px); letter-spacing: .05em; line-height: 1; margin: 0; text-transform: uppercase; overflow-wrap: anywhere; text-shadow: 0 0 40px rgba(127,231,216,.25); }
+  .title { font-family: var(--display); font-weight: 400; font-size: clamp(24px, min(8.4vw, 11vh), 84px); letter-spacing: .05em; line-height: 1; margin: 0; text-transform: uppercase; white-space: nowrap; text-shadow: 0 0 40px rgba(127,231,216,.25); }
   .lede { font-size: 16px; line-height: 1.6; color: var(--starlight); opacity: .86; margin: 0; max-width: 30rem; }
   .fine { font-size: 13px; line-height: 1.6; color: var(--mist); margin: 0; }
   .big-score { font-family: var(--display); font-size: clamp(56px, 16vw, 110px); line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 0 40px rgba(255,207,107,.3); }
@@ -303,6 +315,7 @@
       setInterval(schedule, 50);
     }
     function schedule() {
+      if (music.next < ac.currentTime - 0.1) music.next = ac.currentTime + 0.05; // skip notes missed while throttled
       while (music.next < ac.currentTime + 0.3) { playStep(music.step, music.next); music.step++; music.next += SPB / 2; }
     }
     function voice(freq, t, dur, o) {
@@ -428,6 +441,7 @@
   let total = store.get('const.total', 0), earnedThisGame = [];
   let navEarned = store.get('const.navigator', 0), chart = null, chartedThisGame = false;
   let best = store.get('const.best', 0), bestLevel = store.get('const.bestLevel', 0);
+  let paidUpTo = 0;
   let seq = [], decoys = [], lines = [], inputIdx = 0, perfect = true, spacing = 80, playArea = { x: 0, y: 0, w: 1, h: 1 };
   let particles = [], rings = [], popups = [], past = [], meteors = [], nextMeteor = 4;
   let cam = { z: 1, v: 0, shake: 0 }, lineFlash = 0, pointer = { x: 0, y: 0 }, pastGlow = 0;
@@ -504,8 +518,10 @@
     return pts;
   }
   function buildLevel() {
-    computeArea();
     current = levelInfo(level);
+    el.constNum.textContent = roman(level) + ' · ' + current.latin;
+    el.constName.textContent = current.name;
+    computeArea();
     let order, rest, names = null;
     if (current.stars) {
       // A real constellation, fitted to the board with a little random drift.
@@ -543,7 +559,7 @@
     const goldenIdx = level >= 2 && Math.random() < 0.3 ? 1 + Math.floor(Math.random() * (n - 1)) : -1;
     seq = order.map((p, i) => ({ ...norm(p), idx: i, name: names ? names[i] : '', label: 0, golden: i === goldenIdx, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
     decoys = rest.map(p => ({ ...norm(p), idx: -1, name: '', label: 0, golden: false, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
-    lines = []; inputIdx = 0; perfect = true;
+    lines = []; inputIdx = 0; perfect = true; paidUpTo = 0;
     el.constNum.textContent = roman(level) + ' · ' + current.latin;
     el.constName.textContent = current.name;
   }
@@ -590,9 +606,11 @@
     burst(x, y, col, s.golden ? 34 : 18, s.golden ? 1.3 : 1);
     ring(x, y, col, s.golden ? 110 : 70, 2);
     Sound.tone(SCALE[inputIdx], 0, { gain: 0.22 });
-    let pts = 10 * mult;
-    if (s.golden) { pts += 100 * mult; Sound.sparkle(0.04); popup(x, y - 26, `Golden +${pts}`, 'gold', 20); buzz([12, 30, 12]); }
-    else { popup(x, y - 22, '+' + pts, 'white', 15); buzz(10); }
+    // Stars already paid for before a mistake replay are not paid again
+    const fresh = inputIdx >= paidUpTo; if (fresh) paidUpTo = inputIdx + 1;
+    let pts = fresh ? 10 * mult : 0;
+    if (s.golden && fresh) { pts += 100 * mult; Sound.sparkle(0.04); popup(x, y - 26, `Golden +${pts}`, 'gold', 20); buzz([12, 30, 12]); }
+    else { if (pts) popup(x, y - 22, '+' + pts, 'white', 15); buzz(10); }
     score += pts;
     inputIdx++;
     if (inputIdx >= seq.length) roundComplete();
@@ -647,14 +665,15 @@
     const firstTime = !navEarned;
     navEarned = (navEarned || 0) + 1; store.set('const.navigator', navEarned);
     // Each constellation sits at its real place on the sky; Orion's Belt is drawn as part of Orion.
-    chart = { alpha: 1, labels: 1, items: REAL.slice(1).map(c => {
+    chart = { alpha: 1, labels: 1, bottom: chartTargetBottom(), ext: 0, items: REAL.slice(1).map(c => {
       const v = c.stars.map(([ra, dec]) => { const a = ra * Math.PI / 12, d = dec * Math.PI / 180; return [Math.cos(d) * Math.cos(a), Math.cos(d) * Math.sin(a), Math.sin(d)]; });
       const m = v.reduce((q, p) => [q[0] + p[0], q[1] + p[1], q[2] + p[2]], [0, 0, 0]), ml = Math.hypot(...m);
       return { name: c.name, ra: ((Math.atan2(m[1], m[0]) * 12 / Math.PI) + 24) % 24, dec: Math.asin(m[2] / ml) * 180 / Math.PI, shape: project(c.stars), p: 0, on: false };
     }) };
+    chart.ext = Math.max(...chart.items.flatMap(it => it.shape.flatMap(q => [Math.abs(q.x), Math.abs(q.y)])));
     chart.items.forEach((it, i) => after(300 + i * 230, () => {
       it.on = true; Sound.tone(SCALE[i % SCALE.length], 0, { gain: 0.14 });
-      const q = chartPos(it); burst(q.x, q.y, i % 3 ? 'teal' : 'gold', 14, 0.8); ring(q.x, q.y, 'white', 60, 1.2);
+      const q = chartPos(it, chartLayout()); burst(q.x, q.y, i % 3 ? 'teal' : 'gold', 14, 0.8); ring(q.x, q.y, 'white', 60, 1.2);
     }));
     const doneAt = 300 + chart.items.length * 230 + 500;
     after(doneAt, () => {
@@ -669,13 +688,23 @@
       $('continueBtn').focus({ preventScroll: true });
     });
   }
-  function chartRect() {
-    const top = document.querySelector('.hud').getBoundingClientRect().bottom + 40;
-    return { x: Math.max(40, W * 0.08), y: top, w: W - 2 * Math.max(40, W * 0.08), h: Math.max(160, H * 0.5 - top) }; // top half stays clear of the panel
+  function chartLayout() {
+    // Fits the map between the HUD and the panel, leaving room for each shape's size and its label.
+    const top = document.querySelector('.hud').getBoundingClientRect().bottom + 30;
+    const x0 = Math.max(40, W * 0.08), w = W - 2 * x0, h = Math.max(60, chart.bottom - top);
+    const lab = h > 200 ? 18 : 0;
+    const k = Math.min(Math.min(w / (2 * Math.PI), h / 2.7) * 1.7, (h - lab - 16) / (2 * chart.ext));
+    const pad = chart.ext * k;
+    return { x: x0, y: top + pad, w, h: Math.max(1, h - 2 * pad - lab), k, labels: lab > 0 };
   }
-  function chartPos(it) {
-    const r = chartRect(), u = ((it.ra - 3.8 + 24) % 24) / 24; // the seam falls in an empty stretch of sky
-    return { x: r.x + r.w - u * r.w, y: r.y + ((88 - it.dec) / 155) * r.h };
+  function chartTargetBottom() {
+    const panel = $('chartedScreen').hidden ? null : $('chartedScreen').querySelector('.panel');
+    const pTop = panel ? panel.getBoundingClientRect().top - 24 : H;
+    return Math.min(H * 0.5, pTop, H - 40);
+  }
+  function chartPos(it, L) {
+    const u = ((it.ra - 3.8 + 24) % 24) / 24; // the seam falls in an empty stretch of sky
+    return { x: L.x + L.w - u * L.w, y: L.y + ((88 - it.dec) / 155) * L.h };
   }
   function continueUncharted() {
     if ($('chartedScreen').hidden) return;
@@ -756,10 +785,12 @@
     $('endEyebrow').className = 'eyebrow' + (newBest || chartedThisGame ? ' gold' : '');
     $('endSummary').textContent = chartedThisGame && level === REAL.length
       ? 'You traced all 14 constellations and earned Celestial Navigator.'
-      : (chartedThisGame ? 'You charted the whole sky, then ' : '') + `${chartedThisGame ? 'reached' : 'You reached'} ${current.name}${current.stars ? ' (' + current.latin + ')' : ''}, constellation ${roman(level)}.`;
+      : (chartedThisGame ? 'You charted the whole sky, then ' : '') + `${chartedThisGame ? 'reached' : 'You reached'} ${current.name}${current.stars && current.latin !== current.name ? ' (' + current.latin + ')' : ''}, constellation ${roman(level)}.`;
     const gap = prevBest - score;
     $('endNear').textContent = newBest
       ? (prevBest > 0 ? `${(score - prevBest).toLocaleString()} points past your old best.` : 'Your first mark on the sky.')
+      : prevBest === 0 ? 'Every star you trace adds to your score. Try again?'
+      : gap === 0 ? 'You tied your best. One more to beat it?'
       : gap <= Math.max(100, prevBest * 0.2) ? `Only ${gap.toLocaleString()} points from your best. One more?` : `Your best is ${best.toLocaleString()}.`;
     renderBadges('endBadges', 'endNext');
     const newNames = (chartedThisGame ? ['Celestial Navigator'] : []).concat(earnedThisGame.map(t => BADGES.find(b => b[0] === t)[1]));
@@ -813,8 +844,9 @@
     for (const c of past) c.a = Math.min(1, c.a + dt * 0.5);
     if (chart) {
       for (const it of chart.items) if (it.on) it.p = Math.min(1, it.p + dt * 1.6);
-      const target = phase === 'charted' || phase === 'over' ? 1 : 0.32;
+      const target = phase === 'charted' || phase === 'over' ? 1 : phase === 'input' || phase === 'show' ? 0.08 : 0.16;
       chart.alpha += (target - chart.alpha) * Math.min(1, dt * 1.5);
+      chart.bottom += (chartTargetBottom() - chart.bottom) * Math.min(1, dt * 4);
     }
     pastGlow = Math.max(0, pastGlow - dt * 0.25);
     lineFlash = Math.max(0, lineFlash - dt * 1.2);
@@ -870,11 +902,11 @@
 
     // The whole charted sky, each constellation at its real position
     if (chart) {
-      const r = chartRect(), k = Math.min(r.w / (2 * Math.PI), r.h / 2.7) * 1.7;
+      const L = chartLayout(), k = L.k;
       ctx.font = '400 11px Jost, system-ui, sans-serif'; ctx.textAlign = 'center';
       for (const it of chart.items) {
         if (it.p <= 0) continue;
-        const c = chartPos(it), a = chart.alpha;
+        const c = chartPos(it, L), a = chart.alpha;
         const pts = it.shape.map(q => ({ x: c.x + q.x * k, y: c.y + q.y * k }));
         const segs = (pts.length - 1) * it.p;
         ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 1;
@@ -887,7 +919,7 @@
         }
         ctx.stroke();
         pts.forEach(q => drawSprite('white', q.x, q.y, 16, a * it.p));
-        if (chart.labels && phase === 'charted') {
+        if (chart.labels && L.labels && phase === 'charted') {
           ctx.globalCompositeOperation = 'source-over';
           ctx.globalAlpha = a * it.p * 0.8; ctx.fillStyle = '#c9d2f2';
           ctx.fillText(it.name, c.x, Math.max(...pts.map(q => q.y)) + 16);
@@ -987,6 +1019,7 @@
   $('finishBtn').addEventListener('click', finishCharted);
   el.mute.addEventListener('click', () => { Sound.init(); Sound.toggle(); renderMute(); });
   window.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'm' || e.key === 'M') { Sound.init(); Sound.toggle(); renderMute(); }
     if ((e.key === 'Enter' || e.key === ' ') && document.activeElement === document.body) {
       if (phase === 'menu' || phase === 'over') { e.preventDefault(); startGame(); }
@@ -995,11 +1028,17 @@
   let rt = 0;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 120); });
 
+  // Keep the HUD dimmed whenever any overlay is showing
+  const overlays = [el.start, el.end, $('chartedScreen')];
+  const syncMenu = () => document.body.classList.toggle('menu-open', overlays.some(o => !o.hidden));
+  overlays.forEach(o => new MutationObserver(syncMenu).observe(o, { attributes: true, attributeFilter: ['hidden'] }));
+  syncMenu();
+
   /* ---------------- Boot ---------------- */
   resize();
   pointer.x = W / 2; pointer.y = H / 2;
   renderShields(); renderMult(); renderMute(); renderBadges('startBadges', 'startNext');
-  if (best > 0) $('bestLine').textContent = `Your best: ${best.toLocaleString()} · Constellation ${roman(Math.max(1, bestLevel))}`;
+  if (best > 0) $('bestLine').textContent = `Best score ${best.toLocaleString()} · Furthest constellation ${roman(Math.max(1, bestLevel))}`;
   // A demo constellation glows behind the title screen
   buildLevel();
   seq.forEach((s, i) => after(600 + i * 260, () => { s.target = 0.7; s.pulse = 1; if (i) lines.push({ a: seq[i - 1], b: s, p: 0, speed: 3, alpha: 0.6, fade: false, show: true }); }));
