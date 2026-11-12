@@ -121,6 +121,17 @@
   @keyframes toastin { from { opacity: 0; transform: translate(-50%, 30px) scale(.8); } }
   @keyframes toastout { to { opacity: 0; transform: translate(-50%, 12px); } }
 
+  .overlay.charted {
+    align-items: flex-end;
+    background: linear-gradient(to top, rgba(6,10,28,.94) 0%, rgba(6,10,28,.7) 38%, rgba(6,10,28,0) 62%);
+  }
+  .charted-title { font-family: var(--display); font-weight: 400; font-size: clamp(28px, 7vw, 54px); line-height: 1.1; margin: 0; text-wrap: balance; text-shadow: 0 0 30px rgba(127,231,216,.35); }
+  .medal.large { width: 76px; height: 76px; }
+  .nav-row { display: flex; align-items: center; gap: 14px; text-align: left; }
+  .nav-row .txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .btn-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+  .btn.ghost { background: transparent; border-color: rgba(143,155,199,.45); color: var(--mist); }
+
   @media (prefers-reduced-motion: reduce) {
     .overlay, .badge-toast, .medal.fresh { animation: none; }
   }
@@ -167,6 +178,22 @@
     <button class="btn" id="againBtn">Play again</button>
     <div class="badges" id="endBadges"></div>
     <p class="fine" id="endNext"></p>
+  </div>
+</section>
+
+<section class="overlay charted" id="chartedScreen" hidden>
+  <div class="panel">
+    <span class="eyebrow gold">All 14 constellations traced</span>
+    <h2 class="charted-title">You've charted the night sky</h2>
+    <div class="nav-row">
+      <span id="navMedal"></span>
+      <span class="txt"><span class="eyebrow gold">Special badge</span><span class="badge-name">Celestial Navigator</span><span class="fine" id="navSub">Traced every real constellation in one game</span></span>
+    </div>
+    <p class="fine">Score so far <span id="chartScore"></span>. Keep going into uncharted patterns for more points, or finish here.</p>
+    <div class="btn-row">
+      <button class="btn" id="continueBtn">Explore the uncharted sky</button>
+      <button class="btn ghost" id="finishBtn">Finish here</button>
+    </div>
   </div>
 </section>
 
@@ -228,7 +255,7 @@
 
   /* ---------------- Sound ---------------- */
   const Sound = (() => {
-    let ac = null, master, dry, wet, padVoices = [], muted = store.get('const.muted', false);
+    let ac = null, master, dry, wet, muted = store.get('const.muted', false);
     function impulse(sec) {
       const len = Math.floor(ac.sampleRate * sec), b = ac.createBuffer(2, len, ac.sampleRate);
       for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
@@ -244,19 +271,83 @@
       const verb = ac.createConvolver(); verb.buffer = impulse(3.2);
       wet = ac.createGain(); wet.gain.value = 0.5; wet.connect(verb); verb.connect(master);
       dry = ac.createGain(); dry.gain.value = 0.75; dry.connect(master);
-      // Ambient pad: voices fade in as the multiplier climbs.
-      const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; lp.connect(wet); lp.connect(dry);
-      [73.42, 110.0, 146.83, 220.0, 277.18, 329.63].forEach((f, i) => {
-        const g = ac.createGain(); g.gain.value = 0; g.connect(lp);
-        [-4, 4].forEach(det => { const o = ac.createOscillator(); o.type = i < 2 ? 'sine' : 'triangle'; o.frequency.value = f; o.detune.value = det; o.connect(g); o.start(); });
-        padVoices.push(g);
+      startMusic();
+    }
+
+    /* ----- Generative score: slow D-major cycle at 60 BPM, layers follow intensity 0-5 ----- */
+    const SPB = 1; // seconds per beat (60 BPM, close to a resting heart)
+    const CHORDS = [
+      { bass: 73.42, pad: [146.83, 220.00, 277.18, 329.63, 369.99], arp: [587.33, 659.25, 739.99, 880.00, 1174.66] }, // Dmaj9
+      { bass: 61.74, pad: [123.47, 185.00, 220.00, 293.66, 329.63], arp: [493.88, 587.33, 739.99, 880.00, 987.77] },  // Bm11
+      { bass: 49.00, pad: [98.00, 146.83, 185.00, 246.94, 277.18], arp: [493.88, 587.33, 739.99, 987.77, 1174.66] },  // Gmaj7#11
+      { bass: 55.00, pad: [110.00, 164.81, 220.00, 246.94, 293.66], arp: [440.00, 493.88, 659.25, 880.00, 987.77] }   // Asus
+    ];
+    const music = { step: 0, next: 0, intensity: 0, arpI: 0 };
+    let padBus, padFilter, delayIn, noiseBuf;
+    function startMusic() {
+      padFilter = ac.createBiquadFilter(); padFilter.type = 'lowpass'; padFilter.frequency.value = 650; padFilter.Q.value = 0.7;
+      const lfo = ac.createOscillator(), lfoAmt = ac.createGain(); lfo.frequency.value = 0.066; lfoAmt.gain.value = 260; // one slow breath every 15 s
+      lfo.connect(lfoAmt); lfoAmt.connect(padFilter.frequency); lfo.start();
+      padBus = ac.createGain(); padBus.gain.value = 1; padBus.connect(padFilter); padFilter.connect(dry); padFilter.connect(wet);
+      // Echo for the arpeggio: dotted-eighth feedback delay, darkened on every repeat
+      delayIn = ac.createGain(); const dl = ac.createDelay(2); dl.delayTime.value = SPB * 0.75;
+      const fb = ac.createGain(); fb.gain.value = 0.45; const dlp = ac.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 2400;
+      delayIn.connect(dl); dl.connect(dlp); dlp.connect(fb); fb.connect(dl); dlp.connect(wet); dlp.connect(dry);
+      // Breathing air: filtered noise that swells in and out
+      noiseBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate); const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+      const air = ac.createBufferSource(); air.buffer = noiseBuf; air.loop = true;
+      const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 520; bp.Q.value = 0.6;
+      const airG = ac.createGain(); airG.gain.value = 0.012; const airL = ac.createOscillator(), airA = ac.createGain(); airL.frequency.value = 0.1; airA.gain.value = 0.011;
+      airL.connect(airA); airA.connect(airG.gain); air.connect(bp); bp.connect(airG); airG.connect(wet); airG.connect(dry); air.start(); airL.start();
+      music.next = ac.currentTime + 0.15;
+      setInterval(schedule, 50);
+    }
+    function schedule() {
+      while (music.next < ac.currentTime + 0.3) { playStep(music.step, music.next); music.step++; music.next += SPB / 2; }
+    }
+    function voice(freq, t, dur, o) {
+      const g = ac.createGain(), atk = o.attack || 0.01;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.gain, t + atk);
+      g.gain.setValueAtTime(o.gain, t + Math.max(atk, dur - (o.release || 0.3)));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      (o.detune || [0]).forEach(det => { const osc = ac.createOscillator(); osc.type = o.type || 'sine'; osc.frequency.value = freq; osc.detune.value = det; osc.connect(g); osc.start(t); osc.stop(t + dur + 0.05); });
+      g.connect(o.out); return g;
+    }
+    function heartbeat(t, strength) {
+      [[0, 1], [0.27, 0.55]].forEach(([off, k]) => {
+        const o = ac.createOscillator(), g = ac.createGain(), f = ac.createBiquadFilter();
+        f.type = 'lowpass'; f.frequency.value = 180;
+        o.frequency.setValueAtTime(95, t + off); o.frequency.exponentialRampToValueAtTime(38, t + off + 0.18);
+        g.gain.setValueAtTime(0.0001, t + off); g.gain.exponentialRampToValueAtTime(0.55 * k * strength, t + off + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + off + 0.45);
+        o.connect(f); f.connect(g); g.connect(dry); o.start(t + off); o.stop(t + off + 0.5);
       });
-      setLayers(2);
     }
-    function setLayers(n) {
-      if (!ac) return;
-      padVoices.forEach((g, i) => g.gain.setTargetAtTime(i < n ? (i < 2 ? 0.035 : 0.014) : 0, ac.currentTime, 1.2));
+    function tick(t) {
+      const src = ac.createBufferSource(); src.buffer = noiseBuf; const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+      const g = ac.createGain(); g.gain.setValueAtTime(0.022, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      src.connect(hp); hp.connect(g); g.connect(dry); g.connect(wet); src.start(t, Math.random()); src.stop(t + 0.06);
     }
+    function playStep(st, t) {
+      const I = music.intensity, bar = st % 16, ch = CHORDS[Math.floor(st / 16) % CHORDS.length];
+      if (bar === 0) {
+        const len = 8 * SPB + 3;
+        padFilter.frequency.setTargetAtTime(520 + I * 230, t, 2);
+        ch.pad.forEach(f => voice(f, t, len, { type: 'sawtooth', gain: 0.018, attack: 2.6, release: 3, detune: [-7, 7], out: padBus }));
+        voice(ch.bass, t, len, { gain: 0.12, attack: 1.5, release: 3, out: dry });
+        voice(ch.bass * 2, t, len, { type: 'triangle', gain: 0.03, attack: 2, release: 3, out: padBus });
+        if (I >= 5) ch.pad.slice(2).forEach(f => voice(f * 2, t, len, { gain: 0.012, attack: 3, release: 3, out: padBus }));
+      }
+      const onBeat = st % 2 === 0;
+      if (I >= 1 && onBeat && (I >= 3 || st % 4 === 0)) heartbeat(t, I >= 4 ? 1 : 0.75);
+      if (I >= 4 && !onBeat) tick(t);
+      if (I >= 2 && (I >= 3 || onBeat)) {
+        const pat = [0, 2, 4, 3, 1, 3, 2, 4], n = ch.arp[pat[music.arpI++ % pat.length]];
+        voice(n, t, 1.3, { type: 'triangle', gain: 0.035 + 0.006 * I, attack: 0.006, release: 1.2, out: delayIn });
+      }
+      if (I >= 3 && bar === 8) voice(ch.arp[Math.floor(Math.random() * 5)] * 2, t, 5, { gain: 0.016, attack: 1.2, release: 3.5, out: wet });
+    }
+    // n = 1 + multiplier during play (2..6); 1 means the game is over and only the drone remains.
+    function setLayers(n) { music.intensity = clamp(n - 1, 0, 5); }
     function tone(freq, when = 0, o = {}) {
       if (!ac || muted) return;
       const t = ac.currentTime + when, dur = o.dur || 1.9, peak = o.gain || 0.2;
@@ -335,6 +426,7 @@
   let phase = 'menu', T = 0, timers = [];
   let level = 1, score = 0, shownScore = 0, streak = 0, mult = 1, shields = 2;
   let total = store.get('const.total', 0), earnedThisGame = [];
+  let navEarned = store.get('const.navigator', 0), chart = null, chartedThisGame = false;
   let best = store.get('const.best', 0), bestLevel = store.get('const.bestLevel', 0);
   let seq = [], decoys = [], lines = [], inputIdx = 0, perfect = true, spacing = 80, playArea = { x: 0, y: 0, w: 1, h: 1 };
   let particles = [], rings = [], popups = [], past = [], meteors = [], nextMeteor = 4;
@@ -542,7 +634,59 @@
     const badge = BADGES.find(b => b[0] === total);
     let wait = 2000;
     if (badge) { earnedThisGame.push(badge[0]); after(1100, () => showBadge(badge)); wait = 4200; }
+    if (level === REAL.length && current.stars) { after(wait, skyComplete); return; }
     after(wait, () => { archive(); level++; buildLevel(); playShow(); });
+  }
+
+  /* ---------------- The whole sky, charted ---------------- */
+  function skyComplete() {
+    phase = 'charted'; setBanner('');
+    Sound.setLayers(6);
+    seq = []; decoys = []; lines = []; past = [];
+    chartedThisGame = true;
+    const firstTime = !navEarned;
+    navEarned = (navEarned || 0) + 1; store.set('const.navigator', navEarned);
+    // Each constellation sits at its real place on the sky; Orion's Belt is drawn as part of Orion.
+    chart = { alpha: 1, labels: 1, items: REAL.slice(1).map(c => {
+      const v = c.stars.map(([ra, dec]) => { const a = ra * Math.PI / 12, d = dec * Math.PI / 180; return [Math.cos(d) * Math.cos(a), Math.cos(d) * Math.sin(a), Math.sin(d)]; });
+      const m = v.reduce((q, p) => [q[0] + p[0], q[1] + p[1], q[2] + p[2]], [0, 0, 0]), ml = Math.hypot(...m);
+      return { name: c.name, ra: ((Math.atan2(m[1], m[0]) * 12 / Math.PI) + 24) % 24, dec: Math.asin(m[2] / ml) * 180 / Math.PI, shape: project(c.stars), p: 0, on: false };
+    }) };
+    chart.items.forEach((it, i) => after(300 + i * 230, () => {
+      it.on = true; Sound.tone(SCALE[i % SCALE.length], 0, { gain: 0.14 });
+      const q = chartPos(it); burst(q.x, q.y, i % 3 ? 'teal' : 'gold', 14, 0.8); ring(q.x, q.y, 'white', 60, 1.2);
+    }));
+    const doneAt = 300 + chart.items.length * 230 + 500;
+    after(doneAt, () => {
+      Sound.chord(); Sound.sparkle(0.3); Sound.sparkle(0.8); buzz([30, 60, 30, 60, 80]); kick(0.08);
+      for (let i = 0; i < 10; i++) after(i * 120, () => burst(rand(0.1, 0.9) * W, rand(0.15, 0.6) * H, ['gold', 'teal', 'white', 'violet'][i % 4], 30, 1.5));
+    });
+    after(doneAt + 1400, () => {
+      $('navMedal').innerHTML = navMedal(true, true, 'navbig', true);
+      $('navSub').textContent = firstTime ? 'Traced every real constellation in one game' : `Charted the whole sky ${navEarned} times`;
+      $('chartScore').textContent = score.toLocaleString();
+      $('chartedScreen').hidden = false;
+      $('continueBtn').focus({ preventScroll: true });
+    });
+  }
+  function chartRect() {
+    const top = document.querySelector('.hud').getBoundingClientRect().bottom + 40;
+    return { x: Math.max(40, W * 0.08), y: top, w: W - 2 * Math.max(40, W * 0.08), h: Math.max(160, H * 0.5 - top) }; // top half stays clear of the panel
+  }
+  function chartPos(it) {
+    const r = chartRect(), u = ((it.ra - 3.8 + 24) % 24) / 24; // the seam falls in an empty stretch of sky
+    return { x: r.x + r.w - u * r.w, y: r.y + ((88 - it.dec) / 155) * r.h };
+  }
+  function continueUncharted() {
+    if ($('chartedScreen').hidden) return;
+    $('chartedScreen').hidden = true;
+    chart.labels = 0;
+    level++; buildLevel(); playShow(900);
+  }
+  function finishCharted() {
+    if ($('chartedScreen').hidden) return;
+    $('chartedScreen').hidden = true;
+    gameOver();
   }
 
   function medal(i, earned, fresh, pre = 'm') {
@@ -557,8 +701,19 @@
       + `<circle cx="20" cy="20" r="16" fill="none" stroke="${ring}" stroke-opacity=".35" stroke-width=".6"/>`
       + `<path d="${d}Z" fill="${fill}" stroke="${ring}" stroke-width=".8" stroke-linejoin="round"/></svg>`;
   }
+  function navMedal(earned, fresh, pre, large) {
+    // An eight-point compass star in aurora teal, apart from the gold lifetime medals.
+    let d = '';
+    for (let k = 0; k < 16; k++) { const ang = -Math.PI / 2 + k * Math.PI / 8, rr = k % 2 ? 5 : (k % 4 === 0 ? 16 : 10); d += (k ? 'L' : 'M') + (20 + Math.cos(ang) * rr).toFixed(2) + ' ' + (20 + Math.sin(ang) * rr).toFixed(2); }
+    const ring = earned ? '#7fe7d8' : '#8f9bc7';
+    return `<svg class="medal${large ? ' large' : ''}${earned ? '' : ' locked'}${fresh ? ' fresh' : ''}" viewBox="0 0 40 40" role="img" aria-label="Celestial Navigator, trace all 14 real constellations in one game${earned ? '' : ' (locked)'}"><title>Celestial Navigator · trace all 14 real constellations in one game</title>`
+      + `<defs><radialGradient id="${pre}nav" cx="40%" cy="35%" r="70%"><stop offset="0" stop-color="#ffffff"/><stop offset=".5" stop-color="#7fe7d8"/><stop offset="1" stop-color="#3a8f9a"/></radialGradient></defs>`
+      + `<circle cx="20" cy="20" r="18.5" fill="#0c1431" stroke="${ring}" stroke-width="1.2"/>`
+      + `<circle cx="20" cy="20" r="16" fill="none" stroke="${ring}" stroke-opacity=".35" stroke-width=".6" stroke-dasharray="1 2.2"/>`
+      + `<path d="${d}Z" fill="${earned ? 'url(#' + pre + 'nav)' : 'none'}" stroke="${ring}" stroke-width=".8" stroke-linejoin="round"/></svg>`;
+  }
   function renderBadges(rowId, nextId) {
-    $(rowId).innerHTML = BADGES.map((b, i) => medal(i, total >= b[0], earnedThisGame.includes(b[0]) && rowId === 'endBadges', rowId)).join('');
+    $(rowId).innerHTML = navMedal(!!navEarned, chartedThisGame && rowId === 'endBadges', rowId, false) + BADGES.map((b, i) => medal(i, total >= b[0], earnedThisGame.includes(b[0]) && rowId === 'endBadges', rowId)).join('');
     const next = BADGES.find(b => b[0] > total);
     $(nextId).textContent = next
       ? `${total} constellation${total === 1 ? '' : 's'} traced. Next badge: ${next[1]} at ${next[0]} (${next[0] - total} to go).`
@@ -592,19 +747,23 @@
 
   function gameOver() {
     phase = 'over'; setBanner('');
+    Sound.setLayers(1);
     const newBest = score > best;
     const prevBest = best;
     if (newBest) { best = score; store.set('const.best', best); }
     if (level > bestLevel) { bestLevel = level; store.set('const.bestLevel', bestLevel); }
-    $('endEyebrow').textContent = newBest ? 'New best!' : 'The sky goes quiet';
-    $('endEyebrow').className = 'eyebrow' + (newBest ? ' gold' : '');
-    $('endSummary').textContent = `You reached ${current.name}${current.stars ? ' (' + current.latin + ')' : ''}, constellation ${roman(level)}.`;
+    $('endEyebrow').textContent = chartedThisGame ? (newBest ? 'Night sky charted · New best!' : 'Night sky charted') : newBest ? 'New best!' : 'The sky goes quiet';
+    $('endEyebrow').className = 'eyebrow' + (newBest || chartedThisGame ? ' gold' : '');
+    $('endSummary').textContent = chartedThisGame && level === REAL.length
+      ? 'You traced all 14 constellations and earned Celestial Navigator.'
+      : (chartedThisGame ? 'You charted the whole sky, then ' : '') + `${chartedThisGame ? 'reached' : 'You reached'} ${current.name}${current.stars ? ' (' + current.latin + ')' : ''}, constellation ${roman(level)}.`;
     const gap = prevBest - score;
     $('endNear').textContent = newBest
       ? (prevBest > 0 ? `${(score - prevBest).toLocaleString()} points past your old best.` : 'Your first mark on the sky.')
       : gap <= Math.max(100, prevBest * 0.2) ? `Only ${gap.toLocaleString()} points from your best. One more?` : `Your best is ${best.toLocaleString()}.`;
     renderBadges('endBadges', 'endNext');
-    if (earnedThisGame.length) $('endNext').textContent = 'New this game: ' + earnedThisGame.map(t => BADGES.find(b => b[0] === t)[1]).join(', ') + '. ' + $('endNext').textContent;
+    const newNames = (chartedThisGame ? ['Celestial Navigator'] : []).concat(earnedThisGame.map(t => BADGES.find(b => b[0] === t)[1]));
+    if (newNames.length) $('endNext').textContent = 'New this game: ' + newNames.join(', ') + '. ' + $('endNext').textContent;
     el.end.hidden = false;
     countUp($('endScore'), score);
     if (newBest) {
@@ -624,8 +783,8 @@
   function startGame() {
     Sound.init();
     timers = []; particles = []; rings = []; popups = []; past = []; lines = [];
-    level = 1; score = 0; shownScore = 0; streak = 0; mult = 1; shields = 2; earnedThisGame = [];
-    el.start.hidden = true; el.end.hidden = true;
+    level = 1; score = 0; shownScore = 0; streak = 0; mult = 1; shields = 2; earnedThisGame = []; chart = null; chartedThisGame = false;
+    el.start.hidden = true; el.end.hidden = true; $('chartedScreen').hidden = true;
     renderShields(); renderMult(); Sound.setLayers(2);
     buildLevel();
     playShow(900);
@@ -652,6 +811,11 @@
     for (const p of popups) { p.life += dt; p.y -= dt * 26; }
     popups = popups.filter(p => p.life < 1.4);
     for (const c of past) c.a = Math.min(1, c.a + dt * 0.5);
+    if (chart) {
+      for (const it of chart.items) if (it.on) it.p = Math.min(1, it.p + dt * 1.6);
+      const target = phase === 'charted' || phase === 'over' ? 1 : 0.32;
+      chart.alpha += (target - chart.alpha) * Math.min(1, dt * 1.5);
+    }
     pastGlow = Math.max(0, pastGlow - dt * 0.25);
     lineFlash = Math.max(0, lineFlash - dt * 1.2);
     cam.v += (1 - cam.z) * 120 * dt; cam.v *= Math.pow(0.0005, dt); cam.z += cam.v * dt * 10;
@@ -702,6 +866,34 @@
       ctx.globalAlpha = 1; ctx.strokeStyle = `rgba(${col},${a * 0.6})`; ctx.lineWidth = 0.8;
       ctx.beginPath(); c.shape.forEach((p, i) => { const x = cx + p.x * W, y = cy + p.y * H; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
       c.shape.forEach(p => drawSprite(c.golden ? 'gold' : 'white', cx + p.x * W, cy + p.y * H, 14, a * 1.4));
+    }
+
+    // The whole charted sky, each constellation at its real position
+    if (chart) {
+      const r = chartRect(), k = Math.min(r.w / (2 * Math.PI), r.h / 2.7) * 1.7;
+      ctx.font = '400 11px Jost, system-ui, sans-serif'; ctx.textAlign = 'center';
+      for (const it of chart.items) {
+        if (it.p <= 0) continue;
+        const c = chartPos(it), a = chart.alpha;
+        const pts = it.shape.map(q => ({ x: c.x + q.x * k, y: c.y + q.y * k }));
+        const segs = (pts.length - 1) * it.p;
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 1;
+        ctx.strokeStyle = `rgba(127,231,216,${0.55 * a})`; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) {
+          if (i - 1 >= segs) break;
+          const f = Math.min(1, segs - (i - 1)), q0 = pts[i - 1], q1 = pts[i];
+          ctx.lineTo(q0.x + (q1.x - q0.x) * f, q0.y + (q1.y - q0.y) * f);
+        }
+        ctx.stroke();
+        pts.forEach(q => drawSprite('white', q.x, q.y, 16, a * it.p));
+        if (chart.labels && phase === 'charted') {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = a * it.p * 0.8; ctx.fillStyle = '#c9d2f2';
+          ctx.fillText(it.name, c.x, Math.max(...pts.map(q => q.y)) + 16);
+        }
+      }
+      ctx.globalCompositeOperation = 'lighter';
     }
 
     // Camera: zoom pulse and shake for the active constellation
@@ -791,6 +983,8 @@
   window.addEventListener('pointermove', e => { pointer.x = e.clientX; pointer.y = e.clientY; }, { passive: true });
   $('startBtn').addEventListener('click', startGame);
   $('againBtn').addEventListener('click', startGame);
+  $('continueBtn').addEventListener('click', continueUncharted);
+  $('finishBtn').addEventListener('click', finishCharted);
   el.mute.addEventListener('click', () => { Sound.init(); Sound.toggle(); renderMute(); });
   window.addEventListener('keydown', e => {
     if (e.key === 'm' || e.key === 'M') { Sound.init(); Sound.toggle(); renderMute(); }
