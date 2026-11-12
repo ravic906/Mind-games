@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Constellations</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus&family=Jost:wght@300;400;500&display=swap">
+<style>
+  /* Layout: one full-bleed night sky; HUD floats at the top, the hidden message rests along the horizon. */
+  :root {
+    --night: #060a1c;
+    --ink: #0c1431;
+    --starlight: #fff4dc;
+    --mist: #8f9bc7;
+    --aurora: #7fe7d8;
+    --gold: #ffcf6b;
+    --rose: #ff8fa3;
+    --display: "Marcellus", "Cormorant Garamond", Georgia, serif;
+    --body: "Jost", "Futura", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; margin: 0; }
+  [hidden] { display: none !important; }
+  body {
+    background: var(--night);
+    color: var(--starlight);
+    font-family: var(--body);
+    font-weight: 300;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #sky { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+
+  .hud {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 2;
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 14px);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    pointer-events: none;
+  }
+  .hud-left, .hud-right { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .hud-right { align-items: flex-end; }
+  .eyebrow { font-size: 11px; letter-spacing: .22em; text-transform: uppercase; color: var(--mist); font-weight: 400; }
+  .const-name { font-family: var(--display); font-size: clamp(20px, 4.6vw, 28px); line-height: 1.1; }
+  .score { font-family: var(--display); font-size: clamp(26px, 6vw, 38px); line-height: 1; font-variant-numeric: tabular-nums; }
+  .hud-row { display: flex; align-items: center; gap: 12px; }
+  .mult {
+    font-size: 13px; font-weight: 500; letter-spacing: .06em; font-variant-numeric: tabular-nums;
+    color: var(--night); background: var(--aurora); padding: 2px 9px; border-radius: 999px;
+    transition: transform .25s cubic-bezier(.3,1.8,.5,1), background .3s;
+  }
+  .mult.x1 { background: transparent; color: var(--mist); box-shadow: inset 0 0 0 1px rgba(143,155,199,.4); }
+  .mult.pop { transform: scale(1.35); }
+  .mult.hot { background: var(--gold); }
+  .shields { display: flex; gap: 5px; }
+  .shield { width: 9px; height: 9px; transform: rotate(45deg); border: 1px solid var(--aurora); transition: background .3s, border-color .3s, opacity .3s; }
+  .shield.on { background: var(--aurora); box-shadow: 0 0 8px var(--aurora); }
+  .shield.off { opacity: .35; border-color: var(--mist); }
+  .mute {
+    pointer-events: auto; background: none; border: 0; color: var(--mist); padding: 4px; margin: -4px; cursor: pointer;
+    display: grid; place-items: center; border-radius: 6px;
+  }
+  .mute:focus-visible { outline: 2px solid var(--aurora); outline-offset: 2px; }
+  .mute svg { width: 18px; height: 18px; }
+
+  .banner {
+    position: fixed; left: 0; right: 0; z-index: 2; text-align: center; pointer-events: none;
+    top: calc(env(safe-area-inset-top, 0px) + 84px);
+    font-size: 12px; letter-spacing: .38em; text-transform: uppercase; color: var(--mist); font-weight: 400;
+    opacity: 0; transform: translateY(-4px); transition: opacity .4s, transform .4s;
+  }
+  .banner.show { opacity: 1; transform: none; }
+  .banner.turn { color: var(--aurora); }
+  .banner.warn { color: var(--rose); }
+
+  .message {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; pointer-events: none; text-align: center;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+    font-family: var(--display); font-size: clamp(15px, 3.8vw, 23px); line-height: 1.5; text-wrap: balance;
+  }
+  .message .cap { display: block; font-family: var(--body); font-size: 10px; letter-spacing: .3em; text-transform: uppercase; color: var(--mist); margin-bottom: 4px; }
+  .word { display: inline-block; margin: 0 .22em; white-space: nowrap; }
+  .ch { display: inline-block; }
+  .word.hidden .ch { color: rgba(143,155,199,.35); }
+  .word.lit .ch { color: var(--starlight); text-shadow: 0 0 12px rgba(255,207,107,.55); }
+  .word.new .ch { animation: rise .9s cubic-bezier(.2,.9,.3,1) both; }
+  @keyframes rise {
+    0% { opacity: 0; transform: translateY(10px) scale(.7); filter: blur(6px); color: var(--gold); }
+    60% { opacity: 1; filter: blur(0); color: var(--gold); text-shadow: 0 0 22px var(--gold); }
+    100% { transform: none; }
+  }
+
+  .overlay {
+    position: fixed; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: calc(env(safe-area-inset-top, 0px) + 24px) calc(env(safe-area-inset-bottom, 0px) + 24px);
+    background: radial-gradient(ellipse at center, rgba(6,10,28,.55) 0%, rgba(6,10,28,.88) 70%);
+    animation: fadein .6s ease both;
+  }
+  @keyframes fadein { from { opacity: 0; } }
+  .panel { max-width: 34rem; width: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .title { font-family: var(--display); font-weight: 400; font-size: clamp(34px, 9vw, 84px); letter-spacing: .05em; line-height: 1; margin: 0; text-transform: uppercase; overflow-wrap: anywhere; text-shadow: 0 0 40px rgba(127,231,216,.25); }
+  .lede { font-size: 16px; line-height: 1.6; color: var(--starlight); opacity: .86; margin: 0; max-width: 30rem; }
+  .fine { font-size: 13px; line-height: 1.6; color: var(--mist); margin: 0; }
+  .big-score { font-family: var(--display); font-size: clamp(56px, 16vw, 110px); line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 0 40px rgba(255,207,107,.3); }
+  .eyebrow.gold { color: var(--gold); }
+  .quote { font-family: var(--display); font-size: clamp(28px, 7vw, 54px); line-height: 1.2; margin: 0; text-wrap: balance; text-shadow: 0 0 30px rgba(255,207,107,.35); }
+  .quote .ch { opacity: 0; animation: rise 1.1s cubic-bezier(.2,.9,.3,1) both; }
+  .btn {
+    font-family: var(--body); font-weight: 400; font-size: 13px; letter-spacing: .3em; text-transform: uppercase;
+    color: var(--starlight); background: rgba(127,231,216,.06); border: 1px solid rgba(255,244,220,.55);
+    padding: 15px 36px; border-radius: 2px; cursor: pointer; margin-top: 6px;
+    transition: background .25s, box-shadow .25s, border-color .25s, transform .15s;
+  }
+  .btn:hover { background: rgba(127,231,216,.14); border-color: var(--aurora); box-shadow: 0 0 28px rgba(127,231,216,.3); }
+  .btn:active { transform: scale(.97); }
+  .btn:focus-visible { outline: 2px solid var(--aurora); outline-offset: 4px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .word.new .ch, .quote .ch { animation-duration: .01s; }
+    .overlay { animation: none; }
+  }
+</style>
+
+<canvas id="sky" aria-label="Night sky game board"></canvas>
+
+<header class="hud">
+  <div class="hud-left">
+    <span class="eyebrow" id="constNum">Constellation I</span>
+    <span class="const-name" id="constName">Memoria</span>
+  </div>
+  <div class="hud-right">
+    <span class="score" id="score">0</span>
+    <div class="hud-row">
+      <span class="mult x1" id="mult">×1</span>
+      <span class="shields" id="shields" aria-label="Shields"></span>
+      <button class="mute" id="mute" aria-label="Turn sound off" title="Sound (M)"></button>
+    </div>
+  </div>
+</header>
+
+<div class="banner" id="banner" aria-live="polite"></div>
+
+<div class="message" id="message" aria-live="polite"></div>
+
+<section class="overlay" id="startScreen">
+  <div class="panel">
+    <span class="eyebrow">A memory game for the night sky</span>
+    <h1 class="title">Constellations</h1>
+    <p class="lede">Watch the stars light up, then trace them in the same order. Every constellation you finish uncovers one word of a hidden message.</p>
+    <p class="fine">Shields forgive a wrong star. Perfect rounds raise your multiplier. Golden stars are worth more.<br>Best with sound on.</p>
+    <button class="btn" id="startBtn">Begin</button>
+    <p class="fine" id="bestLine"></p>
+  </div>
+</section>
+
+<section class="overlay" id="endScreen" hidden>
+  <div class="panel">
+    <span class="eyebrow" id="endEyebrow">The sky goes quiet</span>
+    <div class="big-score" id="endScore">0</div>
+    <p class="lede" id="endSummary"></p>
+    <p class="fine" id="endNear"></p>
+    <button class="btn" id="againBtn">Play again</button>
+  </div>
+</section>
+
+<section class="overlay" id="finale" hidden>
+  <div class="panel">
+    <span class="eyebrow gold">Seven constellations. The message is complete.</span>
+    <p class="quote" id="quote"></p>
+    <p class="fine">The sky keeps going for as long as you do.</p>
+    <button class="btn" id="keepBtn">Keep playing</button>
+  </div>
+</section>
+
+<script>
+(() => {
+  'use strict';
+  const MESSAGE = ['Every', 'moment', 'you', 'remembered', 'was', 'already', 'enough.'];
+  const NAMES = ['Memoria', 'Lumen', 'Vigil', 'Aster', 'Quies', 'Anima', 'Tempus', 'Fidelis', 'Aurum', 'Hora', 'Spes', 'Caelum', 'Lyra Minor', 'Ardor', 'Serena', 'Nox Aurea'];
+  // D major pentatonic: every note sounds good next to every other one.
+  const SCALE = [293.66, 329.63, 369.99, 440.0, 493.88, 587.33, 659.25, 739.99, 880.0, 987.77, 1174.66, 1318.51];
+  const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('sky'), ctx = canvas.getContext('2d');
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const roman = n => { const m = [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']]; let s = ''; for (const [v, r] of m) while (n >= v) { s += r; n -= v; } return s; };
+  const buzz = p => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+
+  /* ---------------- Sound ---------------- */
+  const Sound = (() => {
+    let ac = null, master, dry, wet, padVoices = [], muted = store.get('const.muted', false);
+    function impulse(sec) {
+      const len = Math.floor(ac.sampleRate * sec), b = ac.createBuffer(2, len, ac.sampleRate);
+      for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
+      return b;
+    }
+    function init() {
+      if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      ac = new AC();
+      master = ac.createGain(); master.gain.value = muted ? 0 : 0.85;
+      const comp = ac.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+      master.connect(comp); comp.connect(ac.destination);
+      const verb = ac.createConvolver(); verb.buffer = impulse(3.2);
+      wet = ac.createGain(); wet.gain.value = 0.5; wet.connect(verb); verb.connect(master);
+      dry = ac.createGain(); dry.gain.value = 0.75; dry.connect(master);
+      // Ambient pad: voices fade in as the multiplier climbs.
+      const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; lp.connect(wet); lp.connect(dry);
+      [73.42, 110.0, 146.83, 220.0, 277.18, 329.63].forEach((f, i) => {
+        const g = ac.createGain(); g.gain.value = 0; g.connect(lp);
+        [-4, 4].forEach(det => { const o = ac.createOscillator(); o.type = i < 2 ? 'sine' : 'triangle'; o.frequency.value = f; o.detune.value = det; o.connect(g); o.start(); });
+        padVoices.push(g);
+      });
+      setLayers(2);
+    }
+    function setLayers(n) {
+      if (!ac) return;
+      padVoices.forEach((g, i) => g.gain.setTargetAtTime(i < n ? (i < 2 ? 0.035 : 0.014) : 0, ac.currentTime, 1.2));
+    }
+    function tone(freq, when = 0, o = {}) {
+      if (!ac || muted) return;
+      const t = ac.currentTime + when, dur = o.dur || 1.9, peak = o.gain || 0.2;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + (o.attack || 0.005));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      const a = ac.createOscillator(); a.type = o.type || 'sine'; a.frequency.value = freq;
+      const b = ac.createOscillator(); b.type = 'triangle'; b.frequency.value = freq * 2;
+      const bg = ac.createGain(); bg.gain.value = o.harm != null ? o.harm : 0.16;
+      a.connect(g); b.connect(bg); bg.connect(g);
+      let out = g;
+      if (o.lp) { const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; g.connect(f); out = f; }
+      out.connect(dry); out.connect(wet);
+      a.start(t); b.start(t); a.stop(t + dur + 0.05); b.stop(t + dur + 0.05);
+    }
+    function sparkle(when = 0) { [2349.3, 2637.0, 2959.9, 3520.0].forEach((f, i) => tone(f, when + i * 0.045, { gain: 0.05, dur: 0.9, harm: 0 })); }
+    function chord(when = 0) { [293.66, 369.99, 440.0, 587.33, 739.99, 880.0].forEach((f, i) => tone(f, when + i * 0.06, { gain: 0.13, dur: 3.2 })); }
+    function miss() { tone(110, 0, { gain: 0.22, dur: 0.7, type: 'triangle', lp: 380, harm: 0.05 }); tone(103.8, 0.02, { gain: 0.15, dur: 0.7, type: 'sine', lp: 300 }); }
+    function toggle() {
+      muted = !muted; store.set('const.muted', muted);
+      if (ac) master.gain.setTargetAtTime(muted ? 0 : 0.85, ac.currentTime, 0.05);
+      return muted;
+    }
+    return { init, tone, sparkle, chord, miss, setLayers, toggle, get muted() { return muted; } };
+  })();
+
+  /* ---------------- Sprites and sky ---------------- */
+  function sprite(rgb) {
+    const s = 128, c = document.createElement('canvas'); c.width = c.height = s;
+    const g = c.getContext('2d'), grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    grd.addColorStop(0, `rgba(${rgb},1)`); grd.addColorStop(0.1, `rgba(${rgb},.9)`);
+    grd.addColorStop(0.3, `rgba(${rgb},.25)`); grd.addColorStop(1, `rgba(${rgb},0)`);
+    g.fillStyle = grd; g.fillRect(0, 0, s, s); return c;
+  }
+  const SPR = { white: sprite('255,244,220'), teal: sprite('127,231,216'), gold: sprite('255,207,107'), rose: sprite('255,143,163'), violet: sprite('168,150,255') };
+  const RGB = { white: '255,244,220', teal: '127,231,216', gold: '255,207,107', rose: '255,143,163', violet: '168,150,255' };
+
+  let W = 0, H = 0, dpr = 1;
+  const bgCanvas = document.createElement('canvas'), bgCtx = bgCanvas.getContext('2d');
+  let bgStars = [];
+
+  function renderBackdrop() {
+    bgCanvas.width = Math.round(W * dpr); bgCanvas.height = Math.round(H * dpr);
+    const g = bgCtx; g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const lin = g.createLinearGradient(0, 0, W * 0.3, H);
+    lin.addColorStop(0, '#04071a'); lin.addColorStop(0.55, '#0a1030'); lin.addColorStop(1, '#130f2e');
+    g.fillStyle = lin; g.fillRect(0, 0, W, H);
+    const neb = [[0.18, 0.28, 'rgba(110,90,220,.16)'], [0.82, 0.62, 'rgba(60,170,190,.12)'], [0.55, 0.9, 'rgba(160,80,170,.10)'], [0.7, 0.15, 'rgba(70,100,210,.12)']];
+    neb.forEach(([x, y, c]) => {
+      const r = Math.max(W, H) * 0.55, grd = g.createRadialGradient(x * W, y * H, 0, x * W, y * H, r);
+      grd.addColorStop(0, c); grd.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = grd; g.fillRect(0, 0, W, H);
+    });
+    // A faint galactic band of dust across the sky
+    const n = Math.round((W * H) / 900);
+    for (let i = 0; i < n; i++) {
+      const t = Math.random(), off = (Math.random() + Math.random() + Math.random() - 1.5) * Math.min(W, H) * 0.22;
+      const x = t * W * 1.2 - W * 0.1, y = H * 0.85 - t * H * 0.7 + off;
+      g.fillStyle = `rgba(220,215,255,${Math.random() * 0.22})`;
+      g.fillRect(x, y, Math.random() < 0.9 ? 1 : 1.6, 1);
+    }
+  }
+  function makeBgStars() {
+    const n = Math.min(420, Math.round((W * H) / 3600));
+    bgStars = Array.from({ length: n }, () => {
+      const layer = Math.random() < 0.6 ? 0 : Math.random() < 0.7 ? 1 : 2;
+      return { x: Math.random() * W, y: Math.random() * H, r: [0.6, 1.0, 1.5][layer] * rand(0.7, 1.2), layer, a: rand(0.3, 0.9), sp: rand(0.5, 2.2), ph: rand(0, 6.28) };
+    });
+  }
+
+  /* ---------------- State ---------------- */
+  const el = {
+    constNum: $('constNum'), constName: $('constName'), score: $('score'), mult: $('mult'), shields: $('shields'),
+    mute: $('mute'), banner: $('banner'), message: $('message'), start: $('startScreen'), end: $('endScreen'), finale: $('finale')
+  };
+  let phase = 'menu', T = 0, timers = [];
+  let level = 1, score = 0, shownScore = 0, streak = 0, mult = 1, shields = 2, revealed = 0, finaleSeen = false;
+  let best = store.get('const.best', 0), bestLevel = store.get('const.bestLevel', 0);
+  let seq = [], decoys = [], lines = [], inputIdx = 0, perfect = true, spacing = 80, playArea = { x: 0, y: 0, w: 1, h: 1 };
+  let particles = [], rings = [], popups = [], past = [], meteors = [], nextMeteor = 4;
+  let cam = { z: 1, v: 0, shake: 0 }, lineFlash = 0, pointer = { x: 0, y: 0 }, pastGlow = 0;
+
+  const after = (ms, fn) => timers.push({ t: T + ms / 1000, fn });
+  const px = s => playArea.x + s.nx * playArea.w;
+  const py = s => playArea.y + s.ny * playArea.h;
+
+  function computeArea() {
+    const hudBottom = document.querySelector('.hud').getBoundingClientRect().bottom;
+    const msgTop = el.message.getBoundingClientRect().top;
+    const padX = Math.max(34, W * 0.07);
+    const top = hudBottom + 56, bottom = msgTop - 28;
+    playArea = { x: padX, y: top, w: Math.max(80, W - padX * 2), h: Math.max(120, bottom - top) };
+  }
+
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight; dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    renderBackdrop(); makeBgStars(); computeArea();
+  }
+
+  /* ---------------- HUD ---------------- */
+  function renderShields() {
+    el.shields.innerHTML = '';
+    for (let i = 0; i < 3; i++) { const s = document.createElement('span'); s.className = 'shield ' + (i < shields ? 'on' : 'off'); el.shields.appendChild(s); }
+    el.shields.setAttribute('aria-label', `${shields} shield${shields === 1 ? '' : 's'} left`);
+  }
+  function renderMult(pop) {
+    el.mult.textContent = '×' + mult;
+    el.mult.className = 'mult' + (mult === 1 ? ' x1' : '') + (mult >= 4 ? ' hot' : '');
+    if (pop) { el.mult.classList.add('pop'); setTimeout(() => el.mult.classList.remove('pop'), 220); }
+  }
+  function renderMute() {
+    const m = Sound.muted;
+    el.mute.setAttribute('aria-label', m ? 'Turn sound on' : 'Turn sound off');
+    el.mute.innerHTML = m
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>';
+  }
+  function renderMessage(newIndex = -1) {
+    const words = MESSAGE.map((w, i) => {
+      const lit = i < revealed, cls = 'word ' + (lit ? 'lit' : 'hidden') + (i === newIndex ? ' new' : '');
+      const chars = [...w].map((c, j) => `<span class="ch" style="animation-delay:${i === newIndex ? j * 70 : 0}ms">${lit ? c : '·'}</span>`).join('');
+      return `<span class="${cls}">${chars}</span>`;
+    }).join(' ');
+    const cap = revealed >= MESSAGE.length ? 'The message' : `Hidden message · ${revealed} of ${MESSAGE.length} words`;
+    el.message.innerHTML = `<span class="cap">${cap}</span>${words}`;
+  }
+  let bannerTimer = 0;
+  function setBanner(text, kind = '') {
+    clearTimeout(bannerTimer);
+    if (!text) { el.banner.classList.remove('show'); return; }
+    el.banner.textContent = text;
+    el.banner.className = 'banner show ' + kind;
+  }
+
+  /* ---------------- Effects ---------------- */
+  function burst(x, y, color, n, power = 1) {
+    n = Math.round(n * (REDUCED ? 0.35 : 1));
+    for (let i = 0; i < n && particles.length < 700; i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(40, 220) * power;
+      particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: rand(0.5, 1.2), size: rand(5, 13), color });
+    }
+  }
+  function ring(x, y, color, max = 70, width = 2) { rings.push({ x, y, r: 6, max, life: 0, color, width }); }
+  function popup(x, y, text, color = 'white', size = 18) { const m = text.length * size * 0.3 + 8; popups.push({ x: clamp(x, m, W - m), y, text, color, size, life: 0 }); }
+  function kick(z) { if (!REDUCED) cam.v += z; }
+  function shake(s) { if (!REDUCED) cam.shake = Math.max(cam.shake, s); }
+
+  /* ---------------- Levels ---------------- */
+  function buildLevel() {
+    computeArea();
+    const n = Math.min(3 + level - 1, 10);
+    const nDecoys = Math.min(1 + level, 8);
+    const total = n + nDecoys;
+    let d = clamp(Math.sqrt((playArea.w * playArea.h) / total) * 0.66, 46, 150), tries = 0;
+    const pts = [];
+    while (pts.length < total) {
+      if (++tries > 500) { d *= 0.9; tries = 0; }
+      const p = { x: playArea.x + Math.random() * playArea.w, y: playArea.y + Math.random() * playArea.h };
+      if (pts.every(q => dist(p, q) >= d)) pts.push(p);
+    }
+    spacing = d;
+    // Pick the constellation's stars, then order them by a nearest-neighbour walk so it reads as a shape.
+    for (let i = pts.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pts[i], pts[j]] = [pts[j], pts[i]]; }
+    const chosen = pts.slice(0, n), rest = pts.slice(n);
+    const order = [chosen.splice(0, 1)[0]];
+    while (chosen.length) {
+      const last = order[order.length - 1];
+      chosen.sort((a, b) => dist(a, last) - dist(b, last));
+      const k = level > 4 && chosen.length > 1 && Math.random() < 0.35 ? 1 : 0;
+      order.push(chosen.splice(k, 1)[0]);
+    }
+    const norm = p => ({ nx: (p.x - playArea.x) / playArea.w, ny: (p.y - playArea.y) / playArea.h });
+    const goldenIdx = level >= 2 && Math.random() < 0.3 ? 1 + Math.floor(Math.random() * (n - 1)) : -1;
+    seq = order.map((p, i) => ({ ...norm(p), idx: i, golden: i === goldenIdx, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
+    decoys = rest.map(p => ({ ...norm(p), idx: -1, golden: false, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
+    lines = []; inputIdx = 0; perfect = true;
+    el.constNum.textContent = 'Constellation ' + roman(level);
+    el.constName.textContent = NAMES[(level - 1) % NAMES.length];
+  }
+  const allStars = () => seq.concat(decoys);
+  const showInterval = () => Math.max(330, 720 - level * 34);
+
+  function playShow(delay = 650) {
+    phase = 'show'; inputIdx = 0;
+    setBanner('Watch');
+    allStars().forEach(s => { s.hit = false; s.target = 0.18; });
+    lines.forEach(l => (l.fade = true));
+    const iv = showInterval();
+    seq.forEach((s, i) => after(delay + i * iv, () => {
+      s.target = 1; s.pulse = 1;
+      const x = px(s), y = py(s), col = s.golden ? 'gold' : 'teal';
+      ring(x, y, col, 46, 1.5); burst(x, y, col, s.golden ? 10 : 5, 0.5);
+      Sound.tone(SCALE[i], 0, { gain: 0.16 });
+      if (s.golden) Sound.sparkle(0.05);
+      if (i > 0) lines.push({ a: seq[i - 1], b: s, p: 0, speed: 1000 / (iv * 0.5), alpha: 1, fade: false, show: true });
+      after(iv * 0.75, () => { if (phase === 'show') s.target = 0.18; });
+    }));
+    after(delay + seq.length * iv + 200, () => {
+      lines.forEach(l => (l.fade = true));
+      phase = 'input';
+      setBanner('Your turn', 'turn');
+    });
+  }
+
+  function tap(x, y) {
+    if (phase !== 'input') return;
+    const hitR = Math.max(30, spacing * 0.48);
+    let bestS = null, bestD = Infinity;
+    for (const s of allStars()) { const d = Math.hypot(px(s) - x, py(s) - y); if (d < bestD) { bestD = d; bestS = s; } }
+    if (!bestS || bestD > hitR || bestS.hit) return;
+    const expected = seq[inputIdx];
+    if (bestS === expected) correct(bestS); else mistake(bestS);
+  }
+
+  function correct(s) {
+    const x = px(s), y = py(s);
+    s.hit = true; s.target = 0.9; s.pulse = 1.25;
+    if (inputIdx > 0) lines.push({ a: seq[inputIdx - 1], b: s, p: 0, speed: 7, alpha: 1, fade: false });
+    const col = s.golden ? 'gold' : inputIdx === seq.length - 1 ? 'white' : 'teal';
+    burst(x, y, col, s.golden ? 34 : 18, s.golden ? 1.3 : 1);
+    ring(x, y, col, s.golden ? 110 : 70, 2);
+    Sound.tone(SCALE[inputIdx], 0, { gain: 0.22 });
+    let pts = 10 * mult;
+    if (s.golden) { pts += 100 * mult; Sound.sparkle(0.04); popup(x, y - 26, `Golden +${pts}`, 'gold', 20); buzz([12, 30, 12]); }
+    else { popup(x, y - 22, '+' + pts, 'white', 15); buzz(10); }
+    score += pts;
+    inputIdx++;
+    if (inputIdx >= seq.length) roundComplete();
+  }
+
+  function mistake(s) {
+    const x = px(s), y = py(s);
+    s.err = 1; perfect = false; shields--;
+    Sound.miss(); buzz([30, 40, 30]); shake(9);
+    burst(x, y, 'rose', 10, 0.6); ring(x, y, 'rose', 50, 1.5);
+    phase = 'between';
+    renderShields();
+    if (shields < 0) { shields = 0; renderShields(); setBanner('Out of shields', 'warn'); after(900, gameOver); return; }
+    streak = 0; mult = 1; renderMult(); Sound.setLayers(2);
+    setBanner(shields === 0 ? 'Last chance. Watch again' : 'Shield used. Watch again', 'warn');
+    after(1100, () => playShow(400));
+  }
+
+  function roundComplete() {
+    phase = 'between';
+    const cx = playArea.x + playArea.w / 2, cy = playArea.y + playArea.h / 2;
+    if (perfect) { streak++; const old = mult; mult = Math.min(5, 1 + streak); renderMult(mult !== old); }
+    else { streak = 0; mult = 1; renderMult(); }
+    Sound.setLayers(1 + mult);
+    const bonus = 50 * level * mult;
+    score += bonus;
+    after(260, () => {
+      Sound.chord(); buzz([15, 50, 25]);
+      lineFlash = 1; kick(0.07);
+      seq.forEach((s, i) => after(i * 45, () => { s.pulse = 1.5; burst(px(s), py(s), s.golden ? 'gold' : 'white', 12, 0.9); ring(px(s), py(s), 'teal', 90, 1.5); }));
+      popup(cx, cy, `${perfect ? 'Perfect' : 'Complete'}  +${bonus}`, perfect ? 'gold' : 'white', 28);
+      setBanner(perfect ? (mult > 1 ? `Perfect · streak ${streak}` : 'Perfect') : 'Constellation complete', 'turn');
+      if (perfect && streak % 3 === 0 && shields < 3) {
+        shields++; renderShields(); after(500, () => { popup(cx, cy + 40, '+1 shield', 'teal', 18); Sound.tone(1174.66, 0, { gain: 0.08 }); });
+      }
+    });
+    let wait = 1700;
+    if (revealed < MESSAGE.length) {
+      after(1000, () => {
+        revealed++; renderMessage(revealed - 1);
+        [880, 1108.73, 1318.51].forEach((f, i) => Sound.tone(f, 0.15 + i * 0.09, { gain: 0.07, dur: 2.4 }));
+        if (revealed === MESSAGE.length && !finaleSeen) after(1400, showFinale);
+      });
+      wait = 2300;
+    }
+    // The round that completes the message hands over to the finale, which advances the level itself.
+    if (revealed + 1 === MESSAGE.length && !finaleSeen) return;
+    after(wait, () => { archive(); level++; buildLevel(); playShow(); });
+  }
+
+  function archive() {
+    // The finished constellation drifts into the sky and stays there.
+    const pts = seq.map(s => ({ x: px(s), y: py(s) }));
+    const minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x));
+    const minY = Math.min(...pts.map(p => p.y)), maxY = Math.max(...pts.map(p => p.y));
+    const size = Math.max(maxX - minX, maxY - minY, 1);
+    const scale = rand(0.16, 0.24) * Math.min(W, H) / size;
+    const shape = pts.map(p => ({ x: (p.x - (minX + maxX) / 2) * scale / W, y: (p.y - (minY + maxY) / 2) * scale / H }));
+    past.push({ shape, cx: rand(0.1, 0.9), cy: rand(0.15, 0.85), a: 0, golden: seq.some(s => s.golden) });
+    if (past.length > 14) past.shift();
+  }
+
+  function showFinale() {
+    phase = 'finale'; setBanner('');
+    const q = $('quote');
+    let k = 0;
+    q.innerHTML = MESSAGE.map(w => `<span class="word">${[...w].map(c => `<span class="ch" style="animation-delay:${(k++) * 55 + 300}ms">${c}</span>`).join('')}</span>`).join(' ');
+    el.finale.hidden = false; pastGlow = 1;
+    [293.66, 369.99, 440, 587.33, 739.99, 880, 1174.66].forEach((f, i) => Sound.tone(f, i * 0.16, { gain: 0.12, dur: 3.5 }));
+    Sound.sparkle(1.2); buzz([20, 60, 20, 60, 40]);
+    for (let i = 0; i < 6; i++) after(i * 180, () => burst(rand(0.2, 0.8) * W, rand(0.2, 0.7) * H, i % 2 ? 'gold' : 'teal', 30, 1.4));
+    $('keepBtn').focus({ preventScroll: true });
+  }
+  function closeFinale() {
+    if (el.finale.hidden) return;
+    el.finale.hidden = true; finaleSeen = true;
+    archive(); level++; buildLevel(); playShow(900);
+  }
+
+  function gameOver() {
+    phase = 'over'; setBanner('');
+    const newBest = score > best;
+    const prevBest = best;
+    if (newBest) { best = score; store.set('const.best', best); }
+    if (level > bestLevel) { bestLevel = level; store.set('const.bestLevel', bestLevel); }
+    $('endEyebrow').textContent = newBest ? 'New best!' : 'The sky goes quiet';
+    $('endEyebrow').className = 'eyebrow' + (newBest ? ' gold' : '');
+    $('endSummary').textContent = `You reached Constellation ${roman(level)} and uncovered ${revealed} of ${MESSAGE.length} words.`;
+    const gap = prevBest - score;
+    $('endNear').textContent = newBest
+      ? (prevBest > 0 ? `${(score - prevBest).toLocaleString()} points past your old best.` : 'Your first mark on the sky.')
+      : gap <= Math.max(100, prevBest * 0.2) ? `Only ${gap.toLocaleString()} points from your best. One more?` : `Your best is ${best.toLocaleString()}.`;
+    el.end.hidden = false;
+    countUp($('endScore'), score);
+    if (newBest) {
+      Sound.chord(0.2); Sound.sparkle(0.6);
+      for (let i = 0; i < 8; i++) after(i * 140, () => burst(rand(0.1, 0.9) * W, rand(0.1, 0.5) * H, ['gold', 'teal', 'white', 'violet'][i % 4], 30, 1.5));
+    } else {
+      [440, 369.99, 293.66].forEach((f, i) => Sound.tone(f, i * 0.22, { gain: 0.1, dur: 2.4 }));
+    }
+    $('againBtn').focus({ preventScroll: true });
+  }
+  function countUp(node, target) {
+    const start = performance.now(), dur = REDUCED ? 1 : 1100;
+    const step = now => { const t = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - t, 3); node.textContent = Math.round(target * e).toLocaleString(); if (t < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+
+  function startGame() {
+    Sound.init();
+    timers = []; particles = []; rings = []; popups = []; past = []; lines = [];
+    level = 1; score = 0; shownScore = 0; streak = 0; mult = 1; shields = 2; revealed = 0; finaleSeen = false;
+    el.start.hidden = true; el.end.hidden = true; el.finale.hidden = true;
+    renderShields(); renderMult(); renderMessage(); Sound.setLayers(2);
+    buildLevel();
+    playShow(900);
+  }
+
+  /* ---------------- Render loop ---------------- */
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now; T += dt;
+    // timers
+    for (let i = 0; i < timers.length; i++) { const tm = timers[i]; if (T >= tm.t) { timers.splice(i--, 1); tm.fn(); } }
+    update(dt); draw();
+    requestAnimationFrame(frame);
+  }
+
+  function update(dt) {
+    for (const s of allStars()) { s.glow += (s.target - s.glow) * Math.min(1, dt * 10); s.pulse *= Math.pow(0.02, dt); s.err = Math.max(0, s.err - dt * 1.4); s.born = Math.min(1, s.born + dt * 2); }
+    for (const l of lines) { l.p = Math.min(1, l.p + dt * l.speed); if (l.fade) l.alpha -= dt * 1.8; }
+    lines = lines.filter(l => l.alpha > 0);
+    for (const p of particles) { p.life += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= Math.pow(0.12, dt); p.vy *= Math.pow(0.12, dt); p.vy += 18 * dt; }
+    particles = particles.filter(p => p.life < p.max);
+    for (const r of rings) { r.life += dt; r.r += (r.max - r.r) * Math.min(1, dt * 5); }
+    rings = rings.filter(r => r.life < 0.9);
+    for (const p of popups) { p.life += dt; p.y -= dt * 26; }
+    popups = popups.filter(p => p.life < 1.4);
+    for (const c of past) c.a = Math.min(1, c.a + dt * 0.5);
+    pastGlow = Math.max(0, pastGlow - dt * 0.25);
+    lineFlash = Math.max(0, lineFlash - dt * 1.2);
+    cam.v += (1 - cam.z) * 120 * dt; cam.v *= Math.pow(0.0005, dt); cam.z += cam.v * dt * 10;
+    cam.shake = Math.max(0, cam.shake - dt * 40);
+    shownScore += (score - shownScore) * Math.min(1, dt * 8);
+    if (Math.abs(score - shownScore) < 0.5) shownScore = score;
+    el.score.textContent = Math.round(shownScore).toLocaleString();
+    nextMeteor -= dt;
+    if (nextMeteor <= 0 && !REDUCED) { nextMeteor = rand(5, 13); const fromLeft = Math.random() < 0.5; meteors.push({ x: fromLeft ? rand(0, W * 0.5) : rand(W * 0.5, W), y: rand(0, H * 0.35), vx: (fromLeft ? 1 : -1) * rand(500, 800), vy: rand(180, 320), life: 0 }); }
+    for (const m of meteors) { m.life += dt; m.x += m.vx * dt; m.y += m.vy * dt; }
+    meteors = meteors.filter(m => m.life < 0.9);
+  }
+
+  function drawSprite(name, x, y, size, alpha) {
+    if (alpha <= 0.002) return;
+    ctx.globalAlpha = Math.min(1, alpha);
+    ctx.drawImage(SPR[name], x - size / 2, y - size / 2, size, size);
+  }
+
+  function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    ctx.drawImage(bgCanvas, 0, 0, W, H);
+
+    // Parallax starfield
+    const parX = (pointer.x - W / 2) / W, parY = (pointer.y - H / 2) / H;
+    ctx.fillStyle = '#fff4dc';
+    for (const s of bgStars) {
+      const f = (s.layer + 1) * 6;
+      let x = (s.x + T * (s.layer + 1) * 2 - parX * f) % W; if (x < 0) x += W;
+      const y = s.y - parY * f;
+      ctx.globalAlpha = s.a * (0.55 + 0.45 * Math.sin(T * s.sp + s.ph));
+      if (s.r < 1) ctx.fillRect(x, y, s.r * 1.6, s.r * 1.6); else { ctx.beginPath(); ctx.arc(x, y, s.r, 0, 6.283); ctx.fill(); }
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    for (const m of meteors) {
+      const k = 1 - m.life / 0.9, tail = 0.12;
+      const grd = ctx.createLinearGradient(m.x, m.y, m.x - m.vx * tail, m.y - m.vy * tail);
+      grd.addColorStop(0, `rgba(255,244,220,${0.8 * k})`); grd.addColorStop(1, 'rgba(255,244,220,0)');
+      ctx.globalAlpha = 1; ctx.strokeStyle = grd; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(m.x - m.vx * tail, m.y - m.vy * tail); ctx.stroke();
+    }
+
+    // Constellations already finished, kept in the sky
+    for (const c of past) {
+      const a = c.a * (0.22 + pastGlow * 0.6), cx = c.cx * W, cy = c.cy * H;
+      const col = c.golden ? '255,207,107' : '168,190,255';
+      ctx.globalAlpha = 1; ctx.strokeStyle = `rgba(${col},${a * 0.6})`; ctx.lineWidth = 0.8;
+      ctx.beginPath(); c.shape.forEach((p, i) => { const x = cx + p.x * W, y = cy + p.y * H; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+      c.shape.forEach(p => drawSprite(c.golden ? 'gold' : 'white', cx + p.x * W, cy + p.y * H, 14, a * 1.4));
+    }
+
+    // Camera: zoom pulse and shake for the active constellation
+    const sx = cam.shake ? rand(-cam.shake, cam.shake) : 0, sy = cam.shake ? rand(-cam.shake, cam.shake) : 0;
+    ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * (W / 2 * (1 - cam.z) + sx), dpr * (H / 2 * (1 - cam.z) + sy));
+
+    // Lines
+    for (const l of lines) {
+      const ax = px(l.a), ay = py(l.a), bx = px(l.b), by = py(l.b);
+      const ex = ax + (bx - ax) * l.p, ey = ay + (by - ay) * l.p;
+      const a = Math.max(0, l.alpha), boost = 1 + lineFlash * 1.5;
+      const col = l.show ? '127,231,216' : (l.a.golden || l.b.golden) ? '255,207,107' : '255,244,220';
+      ctx.globalAlpha = 1; ctx.lineCap = 'round';
+      ctx.strokeStyle = `rgba(${col},${0.12 * a * boost})`; ctx.lineWidth = 9 * boost;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.strokeStyle = `rgba(${col},${0.75 * a})`; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
+      if (l.p < 1) drawSprite(l.show ? 'teal' : 'white', ex, ey, 26, a);
+    }
+
+    // Stars
+    const base = Math.max(30, Math.min(56, spacing * 0.5));
+    for (const s of allStars()) {
+      const x = px(s), y = py(s), b = s.born;
+      const tw = 0.85 + 0.15 * Math.sin(T * 2.3 + s.nx * 40);
+      let name = 'white';
+      if (s.err > 0.01) name = 'rose';
+      else if (s.golden && (s.glow > 0.4 || s.hit)) name = 'gold';
+      else if (s.hit) name = 'teal';
+      else if (s.glow > 0.4) name = 'teal';
+      const size = base * (0.55 + s.glow * 1.1 + s.pulse * 0.6 + s.err * 0.5) * b;
+      drawSprite(name, x, y, size * 2.2, (0.12 + s.glow * 0.5 + s.err * 0.4) * tw * b);
+      drawSprite(name, x, y, size, (0.55 + s.glow * 0.6 + s.err) * tw * b);
+      ctx.globalAlpha = Math.min(1, (0.75 + s.glow * 0.3) * b);
+      ctx.fillStyle = '#fffaf0';
+      ctx.beginPath(); ctx.arc(x, y, 1.6 + s.glow * 1.8 + s.pulse * 1.2, 0, 6.283); ctx.fill();
+      if (s.glow > 0.5 || s.pulse > 0.3) { // diffraction spikes
+        const k = Math.max(s.glow - 0.4, s.pulse * 0.6), len = size * 0.9;
+        ctx.strokeStyle = `rgba(${RGB[name]},${0.5 * k})`; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x - len, y); ctx.lineTo(x + len, y); ctx.moveTo(x, y - len); ctx.lineTo(x, y + len); ctx.stroke();
+      }
+    }
+
+    for (const r of rings) {
+      const k = 1 - r.life / 0.9;
+      ctx.globalAlpha = 1; ctx.strokeStyle = `rgba(${RGB[r.color]},${0.6 * k})`; ctx.lineWidth = r.width * k + 0.3;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, 6.283); ctx.stroke();
+    }
+    for (const p of particles) {
+      const k = 1 - p.life / p.max;
+      drawSprite(p.color, p.x, p.y, p.size * (0.4 + k * 0.6), k);
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const p of popups) {
+      const k = p.life < 0.15 ? p.life / 0.15 : 1 - Math.max(0, (p.life - 0.8) / 0.6);
+      const sc = 1 + Math.max(0, 0.25 - p.life) * 1.6;
+      ctx.globalAlpha = Math.max(0, k);
+      ctx.font = `${p.size > 20 ? 400 : 500} ${p.size * sc}px ${p.size > 20 ? 'Marcellus, Georgia, serif' : 'Jost, system-ui, sans-serif'}`;
+      ctx.shadowColor = `rgba(${RGB[p.color]},.8)`; ctx.shadowBlur = 14;
+      ctx.fillStyle = `rgb(${RGB[p.color]})`;
+      ctx.fillText(p.text, p.x, p.y);
+    }
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  }
+
+  /* ---------------- Input ---------------- */
+  canvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    pointer.x = e.clientX; pointer.y = e.clientY;
+    Sound.init();
+    // undo the camera zoom so taps land where the stars are drawn
+    const x = (e.clientX - W / 2) / cam.z + W / 2, y = (e.clientY - H / 2) / cam.z + H / 2;
+    tap(x, y);
+  });
+  window.addEventListener('pointermove', e => { pointer.x = e.clientX; pointer.y = e.clientY; }, { passive: true });
+  $('startBtn').addEventListener('click', startGame);
+  $('againBtn').addEventListener('click', startGame);
+  $('keepBtn').addEventListener('click', closeFinale);
+  el.mute.addEventListener('click', () => { Sound.init(); Sound.toggle(); renderMute(); });
+  window.addEventListener('keydown', e => {
+    if (e.key === 'm' || e.key === 'M') { Sound.init(); Sound.toggle(); renderMute(); }
+    if ((e.key === 'Enter' || e.key === ' ') && document.activeElement === document.body) {
+      if (phase === 'menu' || phase === 'over') { e.preventDefault(); startGame(); }
+      else if (phase === 'finale') { e.preventDefault(); closeFinale(); }
+    }
+  });
+  let rt = 0;
+  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 120); });
+
+  /* ---------------- Boot ---------------- */
+  resize();
+  pointer.x = W / 2; pointer.y = H / 2;
+  renderShields(); renderMult(); renderMute(); renderMessage();
+  if (best > 0) $('bestLine').textContent = `Your best: ${best.toLocaleString()} · Constellation ${roman(Math.max(1, bestLevel))}`;
+  // A demo constellation glows behind the title screen
+  buildLevel();
+  seq.forEach((s, i) => after(600 + i * 260, () => { s.target = 0.7; s.pulse = 1; if (i) lines.push({ a: seq[i - 1], b: s, p: 0, speed: 3, alpha: 0.6, fade: false, show: true }); }));
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</html>
