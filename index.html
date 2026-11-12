@@ -105,8 +105,29 @@
   .btn:active { transform: scale(.97); }
   .btn:focus-visible { outline: 2px solid var(--aurora); outline-offset: 4px; }
 
+  .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .medal { width: 36px; height: 36px; display: block; }
+  .medal.locked { opacity: .28; }
+  .medal.fresh { filter: drop-shadow(0 0 10px rgba(255,207,107,.8)); animation: medalpop .8s cubic-bezier(.3,1.6,.5,1) both; }
+  @keyframes medalpop { from { transform: scale(.3) rotate(-30deg); opacity: 0; } }
+  .badge-toast {
+    position: fixed; left: 50%; z-index: 4; pointer-events: none;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+    width: max-content; max-width: calc(100% - 32px);
+    display: flex; align-items: center; gap: 14px; padding: 12px 22px 12px 14px;
+    background: rgba(12,20,49,.82); border: 1px solid rgba(255,207,107,.5); border-radius: 999px;
+    box-shadow: 0 0 40px rgba(255,207,107,.25);
+    transform: translateX(-50%); animation: toastin .7s cubic-bezier(.3,1.5,.5,1) both;
+  }
+  .badge-toast.out { animation: toastout .5s ease both; }
+  .badge-toast .medal { width: 52px; height: 52px; flex: none; }
+  .badge-toast .txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .badge-name { font-family: var(--display); font-size: clamp(18px, 4.4vw, 24px); line-height: 1.15; }
+  @keyframes toastin { from { opacity: 0; transform: translate(-50%, 30px) scale(.8); } }
+  @keyframes toastout { to { opacity: 0; transform: translate(-50%, 12px); } }
+
   @media (prefers-reduced-motion: reduce) {
-    .overlay { animation: none; }
+    .overlay, .badge-toast, .medal.fresh { animation: none; }
   }
 </style>
 
@@ -115,7 +136,7 @@
 <header class="hud">
   <div class="hud-left">
     <span class="eyebrow" id="constNum">Constellation I</span>
-    <span class="const-name" id="constName">Memoria</span>
+    <span class="const-name" id="constName">Orion's Belt</span>
   </div>
   <div class="hud-right">
     <span class="score" id="score">0</span>
@@ -133,10 +154,12 @@
   <div class="panel">
     <span class="eyebrow">A memory game for the night sky</span>
     <h1 class="title">Constellations</h1>
-    <p class="lede">Watch the stars light up, then trace them in the same order. Each constellation is longer and faster than the last.</p>
+    <p class="lede">Watch the stars light up, then trace them in the same order. Every level is a real constellation, from Orion's Belt to Scorpius, and each one is longer and faster than the last.</p>
     <p class="fine">Shields forgive a wrong star. Perfect rounds raise your multiplier. Golden stars are worth more.<br>Best with sound on.</p>
     <button class="btn" id="startBtn">Begin</button>
     <p class="fine" id="bestLine"></p>
+    <div class="badges" id="startBadges"></div>
+    <p class="fine" id="startNext"></p>
   </div>
 </section>
 
@@ -147,13 +170,40 @@
     <p class="lede" id="endSummary"></p>
     <p class="fine" id="endNear"></p>
     <button class="btn" id="againBtn">Play again</button>
+    <div class="badges" id="endBadges"></div>
+    <p class="fine" id="endNext"></p>
   </div>
 </section>
+
+<div class="badge-toast" id="badgeToast" role="status" hidden>
+  <span id="toastMedal"></span>
+  <span class="txt"><span class="eyebrow gold">Badge unlocked</span><span class="badge-name" id="toastName"></span><span class="fine" id="toastSub"></span></span>
+</div>
 
 
 <script>
 (() => {
   'use strict';
+  // Real star patterns: right ascension (hours), declination (degrees), star name. Order = the tracing path.
+  const REAL = [
+    { name: "Orion's Belt", latin: 'Orion', stars: [[5.679, -1.94, 'Alnitak'], [5.604, -1.20, 'Alnilam'], [5.533, -0.30, 'Mintaka']] },
+    { name: 'Triangulum', latin: 'Triangulum', stars: [[1.885, 29.58, 'Mothallah'], [2.159, 34.99, 'β Trianguli'], [2.289, 33.85, 'γ Trianguli']] },
+    { name: 'Southern Cross', latin: 'Crux', stars: [[12.443, -63.10, 'Acrux'], [12.795, -59.69, 'Mimosa'], [12.519, -57.11, 'Gacrux'], [12.252, -58.75, 'Imai']] },
+    { name: 'Great Square', latin: 'Pegasus', stars: [[23.079, 15.21, 'Markab'], [23.063, 28.08, 'Scheat'], [0.140, 29.09, 'Alpheratz'], [0.221, 15.18, 'Algenib']] },
+    { name: 'Cassiopeia', latin: 'Cassiopeia', stars: [[0.153, 59.15, 'Caph'], [0.675, 56.54, 'Schedar'], [0.945, 60.72, 'Navi'], [1.430, 60.24, 'Ruchbah'], [1.907, 63.67, 'Segin']] },
+    { name: 'The Dolphin', latin: 'Delphinus', stars: [[20.554, 11.30, 'Aldulfin'], [20.626, 14.60, 'Rotanev'], [20.661, 15.91, 'Sualocin'], [20.777, 16.12, 'γ Delphini'], [20.724, 15.07, 'δ Delphini']] },
+    { name: 'The Lyre', latin: 'Lyra', stars: [[18.739, 39.67, 'ε Lyrae'], [18.616, 38.78, 'Vega'], [18.746, 37.61, 'ζ Lyrae'], [18.835, 33.36, 'Sheliak'], [18.982, 32.69, 'Sulafat'], [18.908, 36.90, 'δ Lyrae']] },
+    { name: 'Big Dipper', latin: 'Ursa Major', stars: [[13.792, 49.31, 'Alkaid'], [13.399, 54.93, 'Mizar'], [12.900, 55.96, 'Alioth'], [12.257, 57.03, 'Megrez'], [11.897, 53.69, 'Phecda'], [11.031, 56.38, 'Merak'], [11.062, 61.75, 'Dubhe']] },
+    { name: 'Northern Crown', latin: 'Corona Borealis', stars: [[15.549, 31.36, 'θ CrB'], [15.464, 29.11, 'Nusakan'], [15.578, 26.71, 'Alphecca'], [15.712, 26.30, 'γ CrB'], [15.826, 26.07, 'δ CrB'], [15.960, 26.88, 'ε CrB'], [16.024, 29.85, 'ι CrB']] },
+    { name: 'Little Dipper', latin: 'Ursa Minor', stars: [[2.530, 89.26, 'Polaris'], [17.537, 86.59, 'Yildun'], [16.766, 82.04, 'ε UMi'], [15.734, 77.79, 'ζ UMi'], [14.845, 74.16, 'Kochab'], [15.345, 71.83, 'Pherkad'], [16.292, 75.76, 'η UMi']] },
+    { name: 'The Hunter', latin: 'Orion', stars: [[5.919, 7.41, 'Betelgeuse'], [5.585, 9.93, 'Meissa'], [5.419, 6.35, 'Bellatrix'], [5.533, -0.30, 'Mintaka'], [5.604, -1.20, 'Alnilam'], [5.679, -1.94, 'Alnitak'], [5.796, -9.67, 'Saiph'], [5.242, -8.20, 'Rigel']] },
+    { name: 'The Teapot', latin: 'Sagittarius', stars: [[18.097, -30.42, 'Alnasl'], [18.350, -29.83, 'Kaus Media'], [18.403, -34.38, 'Kaus Australis'], [19.043, -29.88, 'Ascella'], [19.116, -27.67, 'τ Sgr'], [18.921, -26.30, 'Nunki'], [18.761, -26.99, 'φ Sgr'], [18.466, -25.42, 'Kaus Borealis']] },
+    { name: 'The Lion', latin: 'Leo', stars: [[9.764, 23.77, 'Ras Elased'], [9.879, 26.01, 'Rasalas'], [10.278, 23.42, 'Adhafera'], [10.333, 19.84, 'Algieba'], [10.122, 16.76, 'η Leonis'], [10.139, 11.97, 'Regulus'], [11.237, 15.43, 'Chertan'], [11.818, 14.57, 'Denebola'], [11.235, 20.52, 'Zosma']] },
+    { name: 'The Scorpion', latin: 'Scorpius', stars: [[16.091, -19.81, 'Acrab'], [16.006, -22.62, 'Dschubba'], [16.490, -26.43, 'Antares'], [16.598, -28.22, 'Paikauhale'], [16.836, -34.29, 'Larawag'], [16.864, -38.05, 'Xamidimura'], [16.910, -42.36, 'ζ Sco'], [17.622, -42.99, 'Sargas'], [17.708, -39.03, 'Girtab'], [17.560, -37.10, 'Shaula']] }
+  ];
+  // Lifetime milestones, counted in constellations traced across all games.
+  const BADGES = [[5, 'Stargazer'], [15, 'Space Explorer'], [30, 'Milky Way Enthusiast'], [50, 'Constellation Hunter'], [75, 'Nebula Navigator'], [100, 'Galactic Voyager'], [150, 'Star Cartographer'], [250, 'Keeper of the Cosmos']];
+  // Invented names for the uncharted patterns after the real sky runs out.
   const NAMES = ['Memoria', 'Lumen', 'Vigil', 'Aster', 'Quies', 'Anima', 'Tempus', 'Fidelis', 'Aurum', 'Hora', 'Spes', 'Caelum', 'Lyra Minor', 'Ardor', 'Serena', 'Nox Aurea'];
   // D major pentatonic: every note sounds good next to every other one.
   const SCALE = [293.66, 329.63, 369.99, 440.0, 493.88, 587.33, 659.25, 739.99, 880.0, 987.77, 1174.66, 1318.51];
@@ -165,6 +215,16 @@
   const rand = (a, b) => a + Math.random() * (b - a);
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const roman = n => { const m = [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']]; let s = ''; for (const [v, r] of m) while (n >= v) { s += r; n -= v; } return s; };
+  // Gnomonic projection of sky coordinates onto a flat chart, east to the left as seen from Earth.
+  function project(stars) {
+    const v = stars.map(([ra, dec]) => { const a = ra * Math.PI / 12, d = dec * Math.PI / 180; return [Math.cos(d) * Math.cos(a), Math.cos(d) * Math.sin(a), Math.sin(d)]; });
+    let c = v.reduce((m, p) => [m[0] + p[0], m[1] + p[1], m[2] + p[2]], [0, 0, 0]);
+    const cl = Math.hypot(...c); c = c.map(x => x / cl);
+    let e = [-c[1], c[0], 0]; const el = Math.hypot(...e) || 1; e = e.map(x => x / el);
+    const n = [c[1] * e[2] - c[2] * e[1], c[2] * e[0] - c[0] * e[2], c[0] * e[1] - c[1] * e[0]];
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    return v.map(p => { const k = dot(p, c); return { x: -dot(p, e) / k, y: -dot(p, n) / k }; });
+  }
   const buzz = p => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -279,6 +339,7 @@
   };
   let phase = 'menu', T = 0, timers = [];
   let level = 1, score = 0, shownScore = 0, streak = 0, mult = 1, shields = 2;
+  let total = store.get('const.total', 0), earnedThisGame = [];
   let best = store.get('const.best', 0), bestLevel = store.get('const.bestLevel', 0);
   let seq = [], decoys = [], lines = [], inputIdx = 0, perfect = true, spacing = 80, playArea = { x: 0, y: 0, w: 1, h: 1 };
   let particles = [], rings = [], popups = [], past = [], meteors = [], nextMeteor = 4;
@@ -341,36 +402,63 @@
   function shake(s) { if (!REDUCED) cam.shake = Math.max(cam.shake, s); }
 
   /* ---------------- Levels ---------------- */
-  function buildLevel() {
-    computeArea();
-    const n = Math.min(3 + level - 1, 10);
-    const nDecoys = Math.min(1 + level, 8);
-    const total = n + nDecoys;
-    let d = clamp(Math.sqrt((playArea.w * playArea.h) / total) * 0.66, 46, 150), tries = 0;
-    const pts = [];
-    while (pts.length < total) {
+  let current = REAL[0];
+  function levelInfo(lv) {
+    if (lv <= REAL.length) return REAL[lv - 1];
+    return { name: NAMES[(lv - REAL.length - 1) % NAMES.length], latin: 'Uncharted', stars: null };
+  }
+  function placeRandom(pts, count, minD) {
+    let d = minD, tries = 0;
+    while (count > 0) {
       if (++tries > 500) { d *= 0.9; tries = 0; }
       const p = { x: playArea.x + Math.random() * playArea.w, y: playArea.y + Math.random() * playArea.h };
-      if (pts.every(q => dist(p, q) >= d)) pts.push(p);
+      if (pts.every(q => dist(p, q) >= d)) { pts.push(p); count--; }
     }
-    spacing = d;
-    // Pick the constellation's stars, then order them by a nearest-neighbour walk so it reads as a shape.
-    for (let i = pts.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pts[i], pts[j]] = [pts[j], pts[i]]; }
-    const chosen = pts.slice(0, n), rest = pts.slice(n);
-    const order = [chosen.splice(0, 1)[0]];
-    while (chosen.length) {
-      const last = order[order.length - 1];
-      chosen.sort((a, b) => dist(a, last) - dist(b, last));
-      const k = level > 4 && chosen.length > 1 && Math.random() < 0.35 ? 1 : 0;
-      order.push(chosen.splice(k, 1)[0]);
+    return pts;
+  }
+  function buildLevel() {
+    computeArea();
+    current = levelInfo(level);
+    let order, rest, names = null;
+    if (current.stars) {
+      // A real constellation, fitted to the board with a little random drift.
+      const raw = project(current.stars);
+      const xs = raw.map(p => p.x), ys = raw.map(p => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+      const w = Math.max(maxX - minX, 1e-6), h = Math.max(maxY - minY, 1e-6);
+      const sc = Math.min(playArea.w * 0.84 / w, playArea.h * 0.84 / h);
+      const ox = playArea.x + (playArea.w - w * sc) / 2 + rand(-1, 1) * (playArea.w - w * sc) * 0.35;
+      const oy = playArea.y + (playArea.h - h * sc) / 2 + rand(-1, 1) * (playArea.h - h * sc) * 0.35;
+      order = raw.map(p => ({ x: ox + (p.x - minX) * sc, y: oy + (p.y - minY) * sc }));
+      names = current.stars.map(st => st[2]);
+      let minPair = Infinity;
+      for (let i = 0; i < order.length; i++) for (let j = i + 1; j < order.length; j++) minPair = Math.min(minPair, dist(order[i], order[j]));
+      const nDecoys = Math.min(1 + level, 8);
+      const all = placeRandom(order.slice(), nDecoys, clamp(minPair * 0.9, 44, 130));
+      rest = all.slice(order.length);
+    } else {
+      const n = 10, nDecoys = 8, total = n + nDecoys;
+      const pts = placeRandom([], total, clamp(Math.sqrt((playArea.w * playArea.h) / total) * 0.66, 46, 150));
+      for (let i = pts.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pts[i], pts[j]] = [pts[j], pts[i]]; }
+      const chosen = pts.slice(0, n); rest = pts.slice(n);
+      order = [chosen.splice(0, 1)[0]];
+      while (chosen.length) {
+        const last = order[order.length - 1];
+        chosen.sort((a, b) => dist(a, last) - dist(b, last));
+        order.push(chosen.splice(chosen.length > 1 && Math.random() < 0.35 ? 1 : 0, 1)[0]);
+      }
     }
+    const allPts = order.concat(rest);
+    spacing = Infinity;
+    for (let i = 0; i < allPts.length; i++) for (let j = i + 1; j < allPts.length; j++) spacing = Math.min(spacing, dist(allPts[i], allPts[j]));
+    const n = order.length;
     const norm = p => ({ nx: (p.x - playArea.x) / playArea.w, ny: (p.y - playArea.y) / playArea.h });
     const goldenIdx = level >= 2 && Math.random() < 0.3 ? 1 + Math.floor(Math.random() * (n - 1)) : -1;
-    seq = order.map((p, i) => ({ ...norm(p), idx: i, golden: i === goldenIdx, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
-    decoys = rest.map(p => ({ ...norm(p), idx: -1, golden: false, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
+    seq = order.map((p, i) => ({ ...norm(p), idx: i, name: names ? names[i] : '', label: 0, golden: i === goldenIdx, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
+    decoys = rest.map(p => ({ ...norm(p), idx: -1, name: '', label: 0, golden: false, glow: 0, target: 0.18, pulse: 0, hit: false, err: 0, born: rand(0, 0.5) }));
     lines = []; inputIdx = 0; perfect = true;
-    el.constNum.textContent = 'Constellation ' + roman(level);
-    el.constName.textContent = NAMES[(level - 1) % NAMES.length];
+    el.constNum.textContent = roman(level) + ' · ' + current.latin;
+    el.constName.textContent = current.name;
   }
   const allStars = () => seq.concat(decoys);
   const showInterval = () => Math.max(330, 720 - level * 34);
@@ -399,7 +487,7 @@
 
   function tap(x, y) {
     if (phase !== 'input') return;
-    const hitR = Math.max(30, spacing * 0.48);
+    const hitR = Math.max(26, Math.min(64, spacing * 0.5));
     let bestS = null, bestD = Infinity;
     for (const s of allStars()) { const d = Math.hypot(px(s) - x, py(s) - y); if (d < bestD) { bestD = d; bestS = s; } }
     if (!bestS || bestD > hitR || bestS.hit) return;
@@ -455,8 +543,44 @@
       }
     });
     pastGlow = 0.5;
-    const wait = 1800;
+    total++; store.set('const.total', total);
+    const badge = BADGES.find(b => b[0] === total);
+    let wait = 2000;
+    if (badge) { earnedThisGame.push(badge[0]); after(1100, () => showBadge(badge)); wait = 4200; }
     after(wait, () => { archive(); level++; buildLevel(); playShow(); });
+  }
+
+  function medal(i, earned, fresh, pre = 'm') {
+    const pts = 4 + i, R = 15, r = 6.5, cx = 20, cy = 20;
+    let d = '';
+    for (let k = 0; k < pts * 2; k++) { const ang = -Math.PI / 2 + k * Math.PI / pts, rr = k % 2 ? r : R; d += (k ? 'L' : 'M') + (cx + Math.cos(ang) * rr).toFixed(2) + ' ' + (cy + Math.sin(ang) * rr).toFixed(2); }
+    const [th, name] = BADGES[i];
+    const ring = earned ? '#ffcf6b' : '#8f9bc7', fill = earned ? 'url(#' + pre + i + ')' : 'none';
+    return `<svg class="medal${earned ? '' : ' locked'}${fresh ? ' fresh' : ''}" viewBox="0 0 40 40" role="img" aria-label="${name}, ${th} constellations${earned ? '' : ' (locked)'}"><title>${name} · ${th} constellations</title>`
+      + `<defs><radialGradient id="${pre}${i}" cx="40%" cy="35%" r="70%"><stop offset="0" stop-color="#fff4dc"/><stop offset=".55" stop-color="#ffcf6b"/><stop offset="1" stop-color="#b8833a"/></radialGradient></defs>`
+      + `<circle cx="20" cy="20" r="18.5" fill="#0c1431" stroke="${ring}" stroke-width="1.2"/>`
+      + `<circle cx="20" cy="20" r="16" fill="none" stroke="${ring}" stroke-opacity=".35" stroke-width=".6"/>`
+      + `<path d="${d}Z" fill="${fill}" stroke="${ring}" stroke-width=".8" stroke-linejoin="round"/></svg>`;
+  }
+  function renderBadges(rowId, nextId) {
+    $(rowId).innerHTML = BADGES.map((b, i) => medal(i, total >= b[0], earnedThisGame.includes(b[0]) && rowId === 'endBadges', rowId)).join('');
+    const next = BADGES.find(b => b[0] > total);
+    $(nextId).textContent = next
+      ? `${total} constellation${total === 1 ? '' : 's'} traced. Next badge: ${next[1]} at ${next[0]} (${next[0] - total} to go).`
+      : `${total} constellations traced. Every badge earned.`;
+  }
+  let toastTimer = 0;
+  function showBadge(b) {
+    const i = BADGES.indexOf(b), t = $('badgeToast');
+    $('toastMedal').innerHTML = medal(i, true, true, 'toast');
+    $('toastName').textContent = b[1];
+    $('toastSub').textContent = `${b[0]} constellations traced`;
+    t.classList.remove('out'); t.hidden = false;
+    Sound.chord(0); Sound.sparkle(0.25); Sound.sparkle(0.6); buzz([20, 40, 20, 40, 60]);
+    const r = t.getBoundingClientRect();
+    for (let k = 0; k < 4; k++) after(k * 120, () => burst(r.left + 40, r.top + r.height / 2, k % 2 ? 'gold' : 'white', 22, 1.2));
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.classList.add('out'); toastTimer = setTimeout(() => { t.hidden = true; }, 500); }, 3000);
   }
 
   function archive() {
@@ -479,11 +603,13 @@
     if (level > bestLevel) { bestLevel = level; store.set('const.bestLevel', bestLevel); }
     $('endEyebrow').textContent = newBest ? 'New best!' : 'The sky goes quiet';
     $('endEyebrow').className = 'eyebrow' + (newBest ? ' gold' : '');
-    $('endSummary').textContent = `You reached Constellation ${roman(level)}, ${NAMES[(level - 1) % NAMES.length]}.`;
+    $('endSummary').textContent = `You reached ${current.name}${current.stars ? ' (' + current.latin + ')' : ''}, constellation ${roman(level)}.`;
     const gap = prevBest - score;
     $('endNear').textContent = newBest
       ? (prevBest > 0 ? `${(score - prevBest).toLocaleString()} points past your old best.` : 'Your first mark on the sky.')
       : gap <= Math.max(100, prevBest * 0.2) ? `Only ${gap.toLocaleString()} points from your best. One more?` : `Your best is ${best.toLocaleString()}.`;
+    renderBadges('endBadges', 'endNext');
+    if (earnedThisGame.length) $('endNext').textContent = 'New this game: ' + earnedThisGame.map(t => BADGES.find(b => b[0] === t)[1]).join(', ') + '. ' + $('endNext').textContent;
     el.end.hidden = false;
     countUp($('endScore'), score);
     if (newBest) {
@@ -503,7 +629,7 @@
   function startGame() {
     Sound.init();
     timers = []; particles = []; rings = []; popups = []; past = []; lines = [];
-    level = 1; score = 0; shownScore = 0; streak = 0; mult = 1; shields = 2;
+    level = 1; score = 0; shownScore = 0; streak = 0; mult = 1; shields = 2; earnedThisGame = [];
     el.start.hidden = true; el.end.hidden = true;
     renderShields(); renderMult(); Sound.setLayers(2);
     buildLevel();
@@ -521,7 +647,7 @@
   }
 
   function update(dt) {
-    for (const s of allStars()) { s.glow += (s.target - s.glow) * Math.min(1, dt * 10); s.pulse *= Math.pow(0.02, dt); s.err = Math.max(0, s.err - dt * 1.4); s.born = Math.min(1, s.born + dt * 2); }
+    for (const s of allStars()) { s.glow += (s.target - s.glow) * Math.min(1, dt * 10); s.pulse *= Math.pow(0.02, dt); s.err = Math.max(0, s.err - dt * 1.4); s.born = Math.min(1, s.born + dt * 2); s.label += ((s.hit && s.name ? 1 : 0) - s.label) * Math.min(1, dt * 5); }
     for (const l of lines) { l.p = Math.min(1, l.p + dt * l.speed); if (l.fade) l.alpha -= dt * 1.8; }
     lines = lines.filter(l => l.alpha > 0);
     for (const p of particles) { p.life += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= Math.pow(0.12, dt); p.vy *= Math.pow(0.12, dt); p.vy += 18 * dt; }
@@ -602,7 +728,7 @@
     }
 
     // Stars
-    const base = Math.max(30, Math.min(56, spacing * 0.5));
+    const base = clamp(spacing * 0.5, 26, 56);
     for (const s of allStars()) {
       const x = px(s), y = py(s), b = s.born;
       const tw = 0.85 + 0.15 * Math.sin(T * 2.3 + s.nx * 40);
@@ -636,6 +762,16 @@
 
     ctx.globalCompositeOperation = 'source-over';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    // Real star names fade in as each star is traced
+    ctx.font = '400 12px Jost, system-ui, sans-serif'; ctx.shadowBlur = 0;
+    for (const s of seq) {
+      if (s.label < 0.02) continue;
+      const x = px(s), y = py(s), right = x > W - 110;
+      ctx.textAlign = right ? 'right' : 'left';
+      ctx.globalAlpha = s.label * 0.85; ctx.fillStyle = s.golden ? '#ffcf6b' : '#c9d2f2';
+      ctx.fillText(s.name, x + (right ? -14 : 14), y + 15);
+    }
+    ctx.textAlign = 'center';
     for (const p of popups) {
       const k = p.life < 0.15 ? p.life / 0.15 : 1 - Math.max(0, (p.life - 0.8) / 0.6);
       const sc = 1 + Math.max(0, 0.25 - p.life) * 1.6;
@@ -673,7 +809,7 @@
   /* ---------------- Boot ---------------- */
   resize();
   pointer.x = W / 2; pointer.y = H / 2;
-  renderShields(); renderMult(); renderMute();
+  renderShields(); renderMult(); renderMute(); renderBadges('startBadges', 'startNext');
   if (best > 0) $('bestLine').textContent = `Your best: ${best.toLocaleString()} · Constellation ${roman(Math.max(1, bestLevel))}`;
   // A demo constellation glows behind the title screen
   buildLevel();
